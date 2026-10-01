@@ -3,6 +3,8 @@
 // in the air by a taxi's and a launch's behaviours; a rejected takeoff taxies off the runway on the path its takeoff branches
 // to, or fails the route.
 #include "control/CapabilityHost.h"
+#include "control/Route.h"
+#include "control/RouteOrder.h"
 #include "core/Geodesy.h"
 #include "fsim/BuiltinControllers.h"
 #include "fsim/GuidanceModes.h"
@@ -19,45 +21,7 @@ constexpr double kClimbedOutAglM = 150.0; // its takeoff hands over to its point
 constexpr double kHoverAglM = 10.0;       // a rotorcraft's, lifted to its hover
 constexpr double kDepartureMaxCasMs = 250.0 * 1852.0 / 3600.0; // 250 kt
 
-WaypointType typeOf(const Waypoint& w) noexcept {
-    return isHold(w.waypointType) ? WaypointType::NavOnly : static_cast<WaypointType>(static_cast<int>(w.waypointType));
-}
-
-bool runwayType(WaypointType t) noexcept { return t == WaypointType::RunwayStart || t == WaypointType::RunwayThreshold || t == WaypointType::RunwayLimit; }
-
-/// The path point i is in (its index), or -1 for none.
-int pathOf(Span<const RoutePath> paths, std::uint32_t i) noexcept {
-    for (std::size_t k = 0; k < paths.size(); ++k)
-        if (i >= paths[k].first && i < paths[k].first + paths[k].count) return static_cast<int>(k);
-    return -1;
-}
-
-PathType pathTypeOf(Span<const RoutePath> paths, std::uint32_t i) noexcept {
-    const int k = pathOf(paths, i);
-    return k < 0 || isHold(paths[static_cast<std::size_t>(k)].type) ? PathType::Primary : static_cast<PathType>(static_cast<int>(paths[static_cast<std::size_t>(k)].type));
-}
-
-/// The point flown after point i (A-GRA's NextPathSegment, else the next in its path, else the next given), or -1: the end.
-std::int64_t nextOf(Span<const Waypoint> points, Span<const RoutePath> paths, std::uint32_t i) noexcept {
-    const Waypoint& w = points[i];
-    if (!isHold(w.next)) return w.next < 0.0 || w.next >= static_cast<double>(points.size()) ? -1 : static_cast<std::int64_t>(w.next);
-    if (!paths.empty()) {
-        const int k = pathOf(paths, i);
-        if (k < 0) return -1;
-        const RoutePath& p = paths[static_cast<std::size_t>(k)];
-        return i + 1 < p.first + p.count ? static_cast<std::int64_t>(i) + 1 : -1;
-    }
-    return i + 1 < points.size() ? static_cast<std::int64_t>(i) + 1 : -1;
-}
-
-bool taxiAt(Span<const Waypoint> points, Span<const RoutePath> paths, std::uint32_t i) noexcept {
-    return typeOf(points[i]) == WaypointType::Taxi || pathTypeOf(paths, i) == PathType::Taxi;
-}
-
-std::uint32_t startOf(const RouteCommand& route, std::size_t count) noexcept {
-    const double s = isHold(route.start) ? 0.0 : route.start;
-    return s >= 0.0 && s < static_cast<double>(count) ? static_cast<std::uint32_t>(s) : 0;
-}
+using namespace order;
 
 } // namespace
 
@@ -84,8 +48,8 @@ Reason CapabilityHost::prepareGroundRoute(RouteCommand& route, Span<const Waypoi
     const Span<const RoutePath> paths = extras ? extras->paths : Span<const RoutePath>{};
     const std::uint32_t s0 = startOf(route, waypoints.size());
     if (!state.onGround) return at(s0, Reason::Airborne); // (a start on the ground, the aircraft flying)
-    if (!ground_) ground_ = std::make_unique<RouteGround>();
-    RouteGround& g = *ground_;
+    if (!ends_) ends_ = std::make_unique<RouteEnds>();
+    RouteGround& g = ends_->ground;
     g = RouteGround{};
     // its taxi points from its start, in the order flown (A-GRA's TAXI: a point's type, or its path's)
     std::int64_t i = s0;
@@ -128,10 +92,12 @@ Reason CapabilityHost::prepareGroundRoute(RouteCommand& route, Span<const Waypoi
         return at(i >= 0 ? i : (taxi.empty() ? s0 : taxi.back()), taxi.empty() ? Reason::InvalidWaypoint : Reason::NotImplemented);
     }
     if (air < 0) return at(fromPoints ? i : s0, Reason::InvalidWaypoint); // (a takeoff to nowhere: its first point in the air)
-    // nothing on the ground after it: a taxi's or a runway's point is flown no more once it flies (a landing's: FA-10)
+    // nothing on the ground after it but a landing (4.59): a taxi's or a runway's point is flown no more once it flies - its
+    // landing's own the landing reads (LandingRoute.cpp)
     {
         std::int64_t k = air;
         for (std::size_t steps = 0; k >= 0 && steps < waypoints.size(); ++steps, k = nextOf(waypoints, paths, static_cast<std::uint32_t>(k))) {
+            if (landingAt(waypoints, paths, static_cast<std::uint32_t>(k))) break;
             const WaypointType t = typeOf(waypoints[static_cast<std::size_t>(k)]);
             if (t == WaypointType::Taxi || runwayType(t)) return at(k, Reason::InvalidWaypoint);
         }
@@ -166,7 +132,7 @@ Reason CapabilityHost::prepareGroundRoute(RouteCommand& route, Span<const Waypoi
             if (g.abortCount) break;
         }
     if (g.abortCount && g.taxiRadiusM <= 0.0) taxiHandling(kTaxiSpeedMs, g);
-    g.active = grounded_ = true;
+    g.active = true, routeEnd(kStartsGrounded, true);
     // the route checked, and flown once it flies, from its first point in the air: what its points leave out completed from
     // where it will have climbed out (not parked: its first point's speed its own now)
     route.start = static_cast<double>(air);
@@ -176,7 +142,7 @@ Reason CapabilityHost::prepareGroundRoute(RouteCommand& route, Span<const Waypoi
 }
 
 void CapabilityHost::departed(sim::VehicleState& s) const noexcept {
-    const RouteGround& g = *ground_;
+    const RouteGround& g = ends_->ground;
     const bool wing = !performance_.hovers;
     if (wing) s.latitudeRad = g.startLatitudeRad, s.longitudeRad = g.startLongitudeRad, s.eulerRad[2] = g.courseRad;
     // its points' speeds left out: its reference airspeed, as a mode given no speed flies, but no faster than 250 kt (the
@@ -247,7 +213,8 @@ Command RouteBehavior::ground(const ControlContext& ctx, const Command& in) {
 }
 
 bool RouteBehavior::handOver(BehaviorCommand& out) const {
-    return ground_ == 2 && launch_->handOver(out); // (its takeoff on the runway: FA's own rest of it - 4.50)
+    return (ground_ == 2 && launch_->handOver(out)) || // (its takeoff on the runway: FA's own rest of it - 4.50)
+           (lands_ == 2 && landing_->handOver(out));      // (its landing's rollout, likewise: 4.59)
 }
 
 bool RouteBehavior::groundProgress(ActivityProgress& out) const noexcept {

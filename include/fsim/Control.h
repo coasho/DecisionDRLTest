@@ -1017,6 +1017,8 @@ struct RouteGround {
     double elevationM = 0.0; ///< a landing line's: its threshold's (4.53)
 };
 
+struct RouteLanding; // below: a route's landing at its end (4.59)
+
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
 /// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
 /// by the host between steps, read by the mode's behaviour during them
@@ -1075,6 +1077,8 @@ struct PathStore {
     InterceptJoin interceptJoin;
     /// The route's start on the ground (4.52): its taxi and its takeoff, as the host resolved them.
     RouteGround routeGround;
+    /// The route's landing at its end (4.59), as the host prepared it: null for a route that does not land.
+    const RouteLanding* landing = nullptr;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -1349,6 +1353,15 @@ public:
         (void)ids, (void)max;
         return 0;
     }
+};
+
+/// A route's landing at its end (docs/flight-autonomy.md, 4.59; LandingRoute.cpp), as the host prepared it at its NEW: the
+/// recovery it lands by, its approach laid in its own path store, and its taxi after it.
+struct RouteLanding {
+    bool active = false;             ///< the route ends in a landing
+    Command recovery;                ///< the recovery's command (a BehaviorCommand), as a recovery's NEW prepares it
+    const PathStore* path = nullptr; ///< its approach, as that recovery flies it
+    RouteGround taxi;                ///< its taxi after it: its points (taxiCount) and handling, as a taxi's
 };
 
 /// What a controller sees each update (design 9.3 "ControlContext").

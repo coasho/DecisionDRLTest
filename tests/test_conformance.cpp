@@ -1011,8 +1011,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               Reason::UnknownTask, Reason::TaskActive,
                                               // further than its fuel or battery takes it (4.18), into the ground (4.19)
                                               Reason::InsufficientEndurance, Reason::TerrainConflict,
-                                              // a route intercept of a plan it does not keep (4.47: a wild draw's)
-                                              Reason::UnknownPlan}));
+                                              // a route intercept of a plan it does not keep (4.47: a wild draw's), a landing path
+                                              // naming no runway of FA's own plan (4.59: likewise)
+                                              Reason::UnknownPlan, Reason::UnknownAirfield}));
         // a policy's precedence override is refused; one that waits was accepted to (4.9)
         if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
         if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);

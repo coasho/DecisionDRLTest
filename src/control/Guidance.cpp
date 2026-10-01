@@ -338,6 +338,7 @@ bool RouteBehavior::place(const ControlContext& ctx, std::uint32_t i, FramePose&
 
 void RouteBehavior::begin(const ControlContext& ctx, const Command& command) {
     reset();
+    lands_ = landing_ && ctx.path && ctx.path->landing ? 1 : 0; // (one that ends in a landing: 4.59)
     wind_.update(ctx.sensed, ctx.dt); // what the first turns are planned with
     if (const auto* r = std::get_if<RouteCommand>(&command)) restart(ctx, *r);
 }
@@ -347,7 +348,7 @@ void RouteBehavior::reset() {
     plan_->trims = route::Trims{};
     lastTime_ = -1.0;
     planned_ = false; // planned afresh from where the aircraft is
-    ground_ = 0;
+    ground_ = lands_ = 0;
 }
 
 bool RouteBehavior::stops() const noexcept {
@@ -594,7 +595,7 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
     }
 }
 
-Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
+Command RouteBehavior::flyRoute(const ControlContext& ctx, const Command& in) {
     const auto& s = ctx.sensed;
     if (resumed(ctx, lastTime_)) plan_->trims = route::Trims{}, wind_.reset();
     wind_.update(s, ctx.dt);
@@ -908,6 +909,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
 
 bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     if (ground_) return groundProgress(out); // (its taxi's or its takeoff's: 4.52)
+    if (lands_ >= 2) return landedProgress(out); // (its landing's, or its taxi's after it: 4.59)
     const route::Plan& p = *plan_;
     if (!planned_ || p.count == 0) return false;
     const Waypoint& segment = p.points[segment_];

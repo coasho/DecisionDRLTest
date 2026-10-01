@@ -1078,6 +1078,44 @@ int alloc() {
         }
     }
     {
+        // a route that ends in a landing (docs/flight-autonomy.md, 4.59): its point in the air, its landing begun inside a step - its
+        // recovery's approach, flare and rollout - and its taxi off the runway, counted from its first step to its end
+        session::World rw(benchWorld("bench-alloc-landing-route", 1));
+        session::VehicleSpec flying = flights::spec("c172-landing-route", "jsbsim:c172", 0, 300.0, 45.0);
+        flying.initial.headingDeg = 0.0;
+        const auto id = rw.createVehicle(flying);
+        for (int k = 0; k < 30; ++k) rw.step();
+        const sim::VehicleState s0 = *rw.vehicleState(id);
+        constexpr double kR = 6371000.0;
+        const double field = s0.altitudeMslM - s0.altitudeAglM;
+        auto point = [&](double north, double east, WaypointType type, double altitude) {
+            Waypoint p;
+            p.latitudeRad = s0.latitudeRad + north / kR, p.longitudeRad = s0.longitudeRad + east / (kR * std::cos(s0.latitudeRad));
+            p.altitudeM = altitude, p.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+            if (type != WaypointType::NavOnly) p.waypointType = static_cast<double>(type);
+            return p;
+        };
+        const std::vector<Waypoint> points = {point(2000.0, 500.0, WaypointType::NavOnly, field + 300.0), point(8000.0, 0.0, WaypointType::RunwayThreshold, field),
+                                              point(11000.0, 0.0, WaypointType::RunwayLimit, field), point(10900.0, 120.0, WaypointType::Taxi, kHold)};
+        const CommandResult r = rw.submit(id, RouteCommand{}, Span<const Waypoint>(points.data(), points.size()));
+        if (!r.accepted()) std::fprintf(stderr, "landing route: refused %s\n", reasonName(r.reason)), std::exit(3);
+        std::uint64_t n, fm;
+        {
+            Counting counting;
+            const int steps = static_cast<int>(1200.0 / (rw.dt() * rw.frameSkip()));
+            for (int k = 0; k < steps && rw.activity(r.activity)->live(); ++k) rw.step();
+            n = counting.count();
+            fm = counting.flightModel();
+        }
+        const bool done = rw.activity(r.activity)->state == ActivityState::Completed && rw.vehicleState(id)->onGround;
+        std::printf("world: %-19s %12llu   (JSBSim: %llu)\n", "landing route", static_cast<unsigned long long>(n), static_cast<unsigned long long>(fm));
+        failures += n != 0;
+        if (!done) {
+            std::printf("FAIL: the landing route never landed and taxied\n");
+            ++failures;
+        }
+    }
+    {
         // a recovery waved off (docs/flight-autonomy.md, 4.54): the F-16C across 15 m/s, beyond its 25 kt - its go-arounds, its
         // circuit and second approach begun inside steps, its failure - counted from its first step until it ends
         session::World rw(benchWorld("bench-alloc-goaround", 1));

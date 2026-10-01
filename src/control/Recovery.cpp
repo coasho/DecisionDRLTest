@@ -156,6 +156,13 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
     if (state.onGround) return detail.index = -1, Reason::OnGround; // (FA's own, on the ground: a landing from the air)
     RouteGround line;
     if (const Reason why = landingLine(b.param("airfield", 0.0), b.param("runway", 0.0), line, detail); why != Reason::None) return why;
+    if (const Reason why = layRecovery(b, line, state, log); why != Reason::None) return why;
+    laidRoute_ = true; // (written to the path store as a route's, with its activity)
+    return Reason::None;
+}
+
+Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const sim::VehicleState& state, CheckLog& log) {
+    CommandResult& detail = log.result;
     const double elevation = line.elevationM, course = line.courseRad;
     const double lat0 = line.startLatitudeRad, lon0 = line.startLongitudeRad;
     Waypoint points[4 + kMissedMost];
@@ -256,7 +263,6 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
     b.params.try_emplace("configuration", 0.0); // (its key in place: an UPDATE of it allocates nothing, 4.58)
     if (profile_ && std::isfinite(profile_->envelope.groundPitchMaxRad)) b.params["_tail"] = profile_->envelope.groundPitchMaxRad;
-    laidRoute_ = true; // (written to the path store as a route's, with its activity)
     return Reason::None;
 }
 

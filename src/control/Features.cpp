@@ -115,10 +115,10 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/next_segment", "fsim.guidance.route", S, 0, 0, ""}, // WPT-14 (FA-6g1: a start turn looped back to)
     {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", P, 16, 0, "a mission critical or lost comms contingency"}, // WPT-15 (FA-6e2)
     {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", S, 0, 0, ""},               // WPT-17 (FA-6a: nav only, passive, end of path)
-    {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", P, 10, R2, "a taxi alone, not to a takeoff: after a landing", false, nullptr, true}, //   the points each action flies (FA-9d)
+    {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", P, 10, R2, "a taxi alone: neither to a takeoff nor after a landing", false, nullptr, true}, //   the points each action flies (FA-9d, FA-10d)
     {"fsim.guidance.route/waypoint_type/runway", "fsim.guidance.route", S, 9, 0, "", false, nullptr, true},
     {"fsim.guidance.route/waypoint_type/takeoff", "fsim.guidance.route", S, 9, 0, ""},
-    {"fsim.guidance.route/waypoint_type/landing", "fsim.guidance.route", N, 10, 0, ""},
+    {"fsim.guidance.route/waypoint_type/landing", "fsim.guidance.route", S, 10, 0, ""}, // (FA-10d: 4.59; a rotorcraft's on its spot)
     {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
     {"fsim.guidance.route/loiter_point", "fsim.guidance.route", S, 0, 0, ""},                // WPT-18 (FA-6b2)
     {"fsim.guidance.route/path_terminators", "fsim.guidance.route", S, 0, 0, ""},            // WPT-19 (FA-6f)

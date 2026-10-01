@@ -940,6 +940,21 @@ private:
     /// A recovery's NEW (4.53; Recovery.cpp): its runway resolved, its approach laid out as a route (laidRoute_), the parameters
     /// its behaviour flies by written ("_...").
     Reason prepareRecovery(BehaviorCommand& recovery, const sim::VehicleState& state, CheckLog& log);
+    /// A recovery's approach onto `line` laid out from `state` (4.53; Recovery.cpp) - into routePlan_, as checkRoute does - and
+    /// the parameters its behaviour flies by written ("_..."): a recovery's NEW's, and a route's landing at its end (4.59).
+    Reason layRecovery(BehaviorCommand& recovery, RouteGround line, const sim::VehicleState& state, CheckLog& log);
+    /// Where a route's landing begins, in its flight order from its start (4.59; LandingRoute.cpp): the point, or -1 for none.
+    std::int64_t landingOf(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RoutePath> paths) const noexcept;
+    /// A route that ends on the ground (4.59; LandingRoute.cpp), its landing beginning at point `at`: its runway resolved - its
+    /// runway points', or the airfield and runway of FA's own plan's LANDING path - the recovery it lands by laid from its last
+    /// point in the air (landingPlan_, landing_: written with it), its taxi after it checked, and its points in the air
+    /// checked as a route's (checkRoute).
+    Reason prepareLanding(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
+                          const RouteExtras* extras, std::uint32_t at);
+    /// A route plan's points and what goes with them into `store` (writeRoute's: a route's, and its landing's approach).
+    void writeRouteTo(PathStore& store, const route::Plan& p);
+    /// A route that ends in a landing, being installed (4.59; LandingRoute.cpp): its behaviour's recovery allocated.
+    void carryLanding(Behavior& behavior);
     /// The wind where the aircraft is beyond its crosswind limit (4.54; Recovery.cpp): its component across `courseRad`, or with
     /// no course (kHold: a taxi, which turns every way) all of it. False where its profile gives no limit.
     bool beyondCrosswind(double courseRad, const sim::VehicleState& state) const noexcept;
@@ -1075,9 +1090,13 @@ private:
     /// The NEW being prepared is a policy's: a launch drops the host's own parameters from it (4.50). In the same hole: a
     /// strip of every policy behaviour's parameters at its NEW cost a behaviour's NEW 6-8 %.
     bool policyNew_ = false;
-    /// The route being prepared starts on the ground: ground_ holds its taxi and takeoff, to be written with it (4.52). In
-    /// the same hole: ground_ itself, at the host's far end, read at every NEW cost a behaviour's NEW 14 to 16 % (a cold line).
-    bool grounded_ = false;
+    /// The route being prepared starts on the ground (kStartsGrounded: ends_->ground holds its taxi and takeoff, 4.52), or
+    /// ends in a landing (kLands: ends_->landing and ->approach hold its recovery, 4.59) - each written with it - or its
+    /// landing is being prepared (kInLanding: its own checks, nested, look for none). In the same hole: ground_ itself, at
+    /// the host's far end, read at every NEW cost a behaviour's NEW 14 to 16 % (a cold line); two flags more, bytes of their
+    /// own past its end, cost a level switch 6 % (built aligned, against its parent).
+    std::uint8_t routeEnds_ = 0;
+    static constexpr std::uint8_t kStartsGrounded = 1, kLands = 2, kInLanding = 4;
     /// The behaviour being prepared laid out a route for its activity (a recovery's approach: 4.53), written with it.
     bool laidRoute_ = false;
     double controlPeriodS_ = 1.0 / 120.0;
@@ -1139,8 +1158,15 @@ private:
     /// The wind a route's checks turn in (4.41): a plan validation's while one runs, else what the air data measure now.
     WindEstimate checkWind(const sim::VehicleState& state) const noexcept;
     std::unique_ptr<PlanStore, PlanStoreFree> plans_; ///< made at the first plan prepared for upload
-    /// A route's start on the ground as its NEW resolved it (4.52; GroundRoute.cpp), written with the route: made at the first.
-    std::unique_ptr<RouteGround> ground_;
+    /// A route's start on the ground (4.52; GroundRoute.cpp) and its landing at its end (4.59; LandingRoute.cpp) as its NEW
+    /// resolved them, written with the route: made at the first - one pointer at the far end.
+    struct RouteEnds {
+        RouteGround ground;                     ///< its taxi and takeoff
+        RouteLanding landing;                   ///< its recovery and its taxi after it
+        std::unique_ptr<route::Plan> approach;  ///< that recovery's approach, laid out
+    };
+    std::unique_ptr<RouteEnds> ends_;
+    void routeEnd(std::uint8_t bit, bool on) noexcept { routeEnds_ = static_cast<std::uint8_t>(on ? routeEnds_ | bit : routeEnds_ & ~bit); }
 };
 
 } // namespace fsim::control

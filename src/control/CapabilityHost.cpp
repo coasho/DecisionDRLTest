@@ -403,6 +403,12 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     const Span<const RoutePath> paths = extras ? extras->paths : Span<const RoutePath>();
     const Span<const RouteBranch> branches = extras ? extras->branches : Span<const RouteBranch>();
     const Span<const RouteTerminator> terminators = extras ? extras->terminators : Span<const RouteTerminator>();
+    // one that ends in a landing (4.59; LandingRoute.cpp): its landing laid, and its points in the air checked here, nested
+    if (!(routeEnds_ & kInLanding)) {
+        routeEnd(kLands, false);
+        if (const std::int64_t at = landingOf(c, waypoints, paths); at >= 0)
+            return prepareLanding(c, waypoints, state, log, extras, static_cast<std::uint32_t>(at));
+    }
     auto bad = [&detail](std::int16_t field) {
         detail.index = field;
         return Reason::InvalidParameter;
@@ -498,7 +504,9 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         // a route's start on the ground (4.52): its taxi's and runway's points, as prepareGroundRoute took them; a takeoff's
         // points are flown as points
         if (type == WaypointType::Takeoff || type == WaypointType::TakeoffInitialPoint || type == WaypointType::TakeoffFinalPoint) continue;
-        if (grounded_ && (type == WaypointType::Taxi || type == WaypointType::RunwayStart || type == WaypointType::RunwayThreshold ||
+        // an approach's points flown as points (4.59: a route's landing begins at its runway's threshold or touchdown)
+        if (type == WaypointType::Approach || type == WaypointType::ApproachInitialPoint || type == WaypointType::ApproachFinalPoint) continue;
+        if ((routeEnds_ & kStartsGrounded) && (type == WaypointType::Taxi || type == WaypointType::RunwayStart || type == WaypointType::RunwayThreshold ||
                                            type == WaypointType::RunwayLimit))
             continue;
         const char* id = nullptr;
@@ -949,7 +957,27 @@ void CapabilityHost::writeCurve(Span<const NurbsSegment> segments, bool appendin
 void CapabilityHost::writeRoute() {
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& store = *config_->path;
-    const route::Plan& p = *routePlan_;
+    writeRouteTo(store, *routePlan_);
+    if (routeEnds_ & kStartsGrounded) store.routeGround = ends_->ground, routeEnd(kStartsGrounded, false); // (its start on the ground: 4.52)
+    else store.routeGround.active = false;
+    // its landing at its end (4.59): the recovery it lands by, that recovery's approach in a store of its own
+    if (routeEnds_ & kLands) {
+        if (!config_->landing) config_->landing = std::make_unique<RouteLandingStore>();
+        RouteLandingStore& l = *config_->landing;
+        writeRouteTo(l.approach, *ends_->approach);
+        l.approach.routeGround.active = false;
+        // (swapped, not copied - prepareLanding lays the host's afresh: a copy's second call of the Command's copy took it out
+        // of submitWith's body, and that moved a behaviour's NEW 21 %)
+        std::swap(l.landing, ends_->landing), l.landing.path = &l.approach;
+        store.landing = &l.landing;
+        routeEnd(kLands, false);
+    } else {
+        store.landing = nullptr;
+    }
+    ++store.revision;
+}
+
+void CapabilityHost::writeRouteTo(PathStore& store, const route::Plan& p) {
     // (a linked route's points as given, its flight order beside them: 4.36)
     const std::uint32_t given = p.linked ? p.given : p.count;
     for (std::uint32_t i = 0; i < given; ++i) store.waypoints[i] = p.points[p.linked ? p.position[i] : i];
@@ -970,8 +998,6 @@ void CapabilityHost::writeRoute() {
     store.routeStateCount = p.stateCount; // (its states placed: 4.34)
     for (std::uint32_t j = 0; j < p.stateCount; ++j) store.routeStates[j] = p.states[j], store.routeStates[j].point = p.named(p.states[j].point);
     if (p.area.laidOut() || store.mustFlyArea.laidOut()) store.mustFlyArea = p.area; // (a must fly's zone or corridor: 4.43, 4.44)
-    if (grounded_) store.routeGround = *ground_, grounded_ = false; // (its start on the ground: 4.52)
-    else store.routeGround.active = false;
     ++store.revision;
 }
 
@@ -1240,9 +1266,11 @@ ActivityRecord& CapabilityHost::start(std::size_t s, const Launch& what, const C
 Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept {
     const CapabilityDescriptor& d = catalog_->descriptor(index);
     axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
-    // a route that starts on the ground (as prepared: 4.52) owns what its taxi and takeoff set - its gear, flaps and brakes
-    if (grounded_ && !options.axes && std::holds_alternative<RouteCommand>(command))
-        axes = static_cast<AxisMask>(axes | axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes));
+    // a route that starts on the ground (as prepared: 4.52) owns what its taxi and takeoff set - its gear, flaps and brakes; one
+    // that ends in a landing (4.59), what its recovery sets - those and its speedbrake
+    if ((routeEnds_ & (kStartsGrounded | kLands)) && !options.axes && std::holds_alternative<RouteCommand>(command))
+        axes = static_cast<AxisMask>(axes | axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes) |
+                                     ((routeEnds_ & kLands) ? axisBit(Axis::Speedbrake) : 0));
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
     if (d.level != Level::Actuator) axes = widenToGroups(axes, d.axisGroups);
@@ -1258,7 +1286,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
-    grounded_ = laidRoute_ = false;
+    routeEnd(kStartsGrounded, false), laidRoute_ = false;
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) { // its waypoints completed, and checked as its range policy says
         // (one that starts on the ground: its taxi and takeoff first, its points from where it has taken off - 4.52)
         const Reason why = startsOnGround(*route, waypoints, extras ? extras->paths : Span<const RoutePath>{})
@@ -1321,6 +1349,7 @@ void CapabilityHost::launch(const Launch& what, const CommandOptions& options, C
     while (s + 1 < kSlotCount && slots_[s].activity) ++s;
     RuntimeConfig& config = *config_;
     if (route) writeRoute(), routePlan_->passed.clear(); // (a guidance activity owns every primary axis: one route flies at a time)
+    if (route && config.path->landing && behavior) carryLanding(*behavior); // (one that ends in a landing: 4.59)
     if (auto* c = std::get_if<CurveCommand>(&setpoint)) writeCurve(curve, false), c->append = kHold;
     if (std::holds_alternative<PatternCommand>(setpoint)) writeShape();
     SetpointSlot& slot = config.slots[s];
@@ -1761,6 +1790,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     result.commandId = records_[s].commandId;
     CheckLog log{result, slots_[s].range, &details_};
     if (const Reason why = checkRoute(next, points, state, log, &extras); why != Reason::None) return about(rejected(why, activity), result);
+    // a landing at its end is its NEW's: an UPDATE does not add one to a route begun without (4.59)
+    if ((routeEnds_ & kLands) && !config_->path->landing) return routeEnd(kLands, false), rejected(Reason::NotUpdatable, activity);
     checkTerrain(Command(next), state, log);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;

@@ -134,6 +134,13 @@ struct Protection {
     bool wingborne = true;
 };
 
+/// A route's landing at its end (docs/flight-autonomy.md, 4.59): the recovery it lands by, and that recovery's approach in
+/// a path store of its own.
+struct RouteLandingStore {
+    RouteLanding landing;
+    PathStore approach;
+};
+
 struct RuntimeConfig {
     static constexpr std::size_t kSlots = kSlotCount;
     static constexpr std::uint8_t kNone = 0xFF;    ///< no owner: the vehicle default flies the axis
@@ -153,6 +160,10 @@ struct RuntimeConfig {
     /// The route a guidance mode flies (ControlContext::path): allocated at the
     /// vehicle's first route and kept; the host writes it between steps.
     std::unique_ptr<PathStore> path;
+    /// A route's landing at its end (docs/flight-autonomy.md, 4.59; PathStore::landing): allocated at the first route that
+    /// lands and kept - one pointer (in place, over 2 KB beside the slots, it cost a behaviour's NEW 21 %); the host writes it
+    /// between steps.
+    std::unique_ptr<RouteLandingStore> landing;
     /// Per primary axis: bumped each time it returns to the vehicle default
     /// (or the default becomes a hold), so the hold captures it afresh.
     std::array<std::uint32_t, kPrimaryAxisCount> letGo{};

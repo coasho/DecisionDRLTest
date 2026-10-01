@@ -64,7 +64,8 @@ add_library(fsim_control STATIC
     Taxi.cpp
     GroundRoute.cpp
     Recovery.cpp
-    BehaviorUpdate.cpp)
+    BehaviorUpdate.cpp
+    LandingRoute.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

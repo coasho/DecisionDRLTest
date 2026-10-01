@@ -139,6 +139,8 @@ class PatternBehavior;
 /// leg meets it by a pattern's behaviour, from where the aircraft is; at its
 /// end the route goes on to the next point from where it left it - or, its
 /// last point's, completes.
+class RecoveryBehavior;
+
 class FSIM_API RouteBehavior final : public Behavior {
 public:
     RouteBehavior();
@@ -162,8 +164,14 @@ public:
     /// the point flown to and how far along the path it is, the one after it and the leg on; its loiter's orbits there.
     bool segments(SegmentEstimate& out) const noexcept override;
     /// Its takeoff on the runway, a route's that starts on the ground (docs/flight-autonomy.md, 4.52): FA's own rest of it
-    /// (4.50).
+    /// (4.50); its landing's rollout, a route's that ends in one (4.59), likewise.
     bool handOver(BehaviorCommand& out) const override;
+    /// A route that ends in a landing (4.59; LandingRoute.cpp) sets its gear, flaps, brakes and speedbrake as its recovery does.
+    bool configures() const noexcept override { return lands_ != 0; }
+    /// Its recovery for a landing at its end allocated (4.59): by the host, as it installs one that lands - never in a step.
+    void carryLanding();
+    void configure(ActuatorCommand& out) const noexcept override;
+    double speedbrake() const noexcept override;
 
 private:
     /// Plan the route from where the aircraft is, and fly it from its start. `branchTo` given, a branch taken (4.37;
@@ -334,6 +342,14 @@ private:
     std::uint8_t ground_ = 0; ///< 0 in the air (or none); 1 its taxi, 2 its takeoff, 3 off the runway rejected, 4/5 stopped so
     std::unique_ptr<TaxiBehavior> taxi_;     ///< allocated with the behaviour: nothing in a step
     std::unique_ptr<LaunchBehavior> launch_; ///< likewise
+    // its landing at its end (4.59; LandingRoute.cpp): flown by its recovery after its last point in the air, then its taxi off
+    // the runway
+    Command flyRoute(const ControlContext& ctx, const Command& in); ///< its points in the air
+    Command beginLanding(const ControlContext& ctx, const Command& in);
+    Command landed(const ControlContext& ctx, const Command& in);
+    bool landedProgress(ActivityProgress& out) const noexcept;
+    std::uint8_t lands_ = 0; ///< 0 none; 1 its points in the air first, 2 landing, 3 its taxi after, 4 done
+    std::unique_ptr<RecoveryBehavior> landing_; ///< allocated as the host installs one that lands (carryLanding)
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

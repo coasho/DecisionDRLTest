@@ -289,6 +289,9 @@ Command TaxiBehavior::update(const ControlContext& ctx, const Command&) {
     throttleI_ = std::clamp(throttleI_ + 0.05 * err * dt, 0.0, 0.5);
     a.throttle = std::clamp(0.15 * err + throttleI_, 0.0, 0.8);
     double brake = err < -0.3 ? std::clamp(0.4 * (-err - 0.3), 0.0, 1.0) : 0.0;
+    // no throttle against its brakes: the integral its breakaway built carried the U-2S, its first arc 23 m from where it stood,
+    // into it 1.2 m/s fast and 3.1 m wide (FA-10d, the backlog's B-5)
+    if (brake > 0.0) a.throttle = 0.0;
     if (target < 0.05) a.throttle = 0.0, throttleI_ = 0.0, brake = 1.0; // (held: stopped, or stopping)
     a.brakeLeft = a.brakeRight = brake;
     // done: stopped at its end, for a second

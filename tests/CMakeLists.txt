@@ -48,6 +48,7 @@ add_executable(fsim_tests
     test_launch.cpp
     test_taxi.cpp
     test_ground_route.cpp
+    test_landing_route.cpp
     test_recovery.cpp
     test_drag_devices.cpp
     test_intercept.cpp

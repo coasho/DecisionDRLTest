@@ -237,6 +237,33 @@ class LaunchTest(unittest.TestCase):
         self.assertLess(sink, 3.2)               # (1.05 m/s)
         self.assertLess(math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1]), 0.5)
 
+    def test_a_route_that_lands(self):
+        # a route that ends in a landing (4.59): two points in the air, the runway's threshold and limit, two taxi points off it -
+        # landed in its touchdown zone, taxied to its end, completed
+        w = world("py-landing-route")
+        v = w.create_vehicle("f16c", "jsbsim:f16c", latitude_deg=40.0, longitude_deg=0.0, altitude_msl_m=1000.0, heading_deg=0.0, airspeed_ms=90.0)
+        w.step(10)
+        s = v.state
+        lat0, lon0, ground = s.latitude_rad, s.longitude_rad, s.altitude_msl_m - s.altitude_agl_m
+        T = fsim.WaypointType
+        at = lambda n, e, t=fsim.HOLD, alt=fsim.HOLD, ref=fsim.HOLD: fsim.Waypoint(lat0 + n / R, lon0 + e / (R * math.cos(lat0)), alt, ref, waypoint_type=t)  # noqa: E731
+        a = v.submit_route([at(5000.0, 3000.0, alt=ground + 900.0, ref="msl"), at(10000.0, 6000.0, alt=ground + 800.0, ref="msl"),
+                            at(20000.0, 0.0, T.RUNWAY_THRESHOLD, ground, "msl"), at(23000.0, 0.0, T.RUNWAY_LIMIT, ground, "msl"),
+                            at(22900.0, 120.0, T.TAXI), at(22700.0, 250.0, T.TAXI)])
+        touched = None
+        for _ in range(1500):
+            w.step(int(round(1.0 / w.step_seconds)))
+            s = v.state
+            if touched is None and s.on_ground:
+                touched = (s.latitude_rad - lat0) * R - 20000.0
+            if a.info.state not in (fsim.ActivityState.PENDING, fsim.ActivityState.ACTIVE):
+                break
+        self.assertEqual(a.info.state, fsim.ActivityState.COMPLETED)
+        self.assertTrue(0.0 < touched < 900.0)  # (its touchdown zone: 437 m along)
+        s = v.state
+        self.assertLess(math.hypot((s.latitude_rad - lat0) * R - 22700.0, (s.longitude_rad - lon0) * R * math.cos(lat0) - 250.0), 1.0)
+        self.assertEqual(v.support("fsim.guidance.route/waypoint_type/landing").support, fsim.Support.SUPPORTED)
+
     def test_cleanup_and_dirtyup(self):
         # A-GRA's CleanUp and DirtyUp (4.58): an update of the recovery's configuration - the C172 at 44 m/s, above its flaps' 85 kt
         # (43.7 m/s): dirtying up refused; cleaning up and handing back taken, the recovery not started again

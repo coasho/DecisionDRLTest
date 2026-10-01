@@ -941,7 +941,7 @@ int main(int argc, char** argv) {
             CHECK(sp.waypoints[0].kind == FSIM_END_POINT_WAYPOINT && sp.waypoints[0].waypoint_type == FSIM_WAYPOINT_PASSIVE);
             CHECK(sp.waypoints[1].frame == (double)frame_id && sp.waypoints[1].frame_y_m == 1000.0);
             CHECK(fabs((sp.waypoints[1].longitude_rad - frame.longitude_rad) * 6371008.8 * cos(frame.latitude_rad) - 1000.0) < 1.0); /* (placed there) */
-            pts[0].waypoint_type = FSIM_WAYPOINT_TOUCHDOWN; /* (an approach's and a touchdown: FA-10's) */
+            pts[0].waypoint_type = FSIM_WAYPOINT_HARD_DITCH; /* (a ditch: FA-16's) */
             CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
                   strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 1);
             pts[0].waypoint_type = FSIM_WAYPOINT_NAV_ONLY, pts[0].kind = FSIM_END_POINT_TURN_POINT; /* (a type is a waypoint's) */
