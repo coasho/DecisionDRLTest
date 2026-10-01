@@ -315,7 +315,7 @@ class CapabilityTest(unittest.TestCase):
                                                        "HSA_CSA": ["fsim.guidance.hsa"], "LOITER": ["fsim.guidance.pattern"],
                                                        "LAUNCH": ["fsim.guidance.launch"], "MUST_FLY": ["fsim.guidance.must_fly"],
                                                        "ROUTE_INTERCEPT": ["fsim.guidance.intercept"],
-                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
+                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.taxi", "fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")

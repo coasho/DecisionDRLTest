@@ -919,6 +919,10 @@ private:
     /// wing's rotation and climb speeds, written into the behaviour's parameters. UnknownAirfield or InvalidParameter with the
     /// field (0 the airfield, 1 the runway); NotImplemented for a wing with no speed to rotate at.
     Reason prepareLaunch(BehaviorCommand& launch, const sim::VehicleState& state, CommandResult& detail);
+    /// A taxi's NEW (4.51; Taxi.cpp): its points checked against the aircraft's tightest turn on its wheels - each corner's
+    /// arc fits its legs, none sharper than 170 deg - else InvalidWaypoint at the point, MaxTurnRate; its path's origin and
+    /// arcs written into the behaviour's parameters. NotImplemented for an aircraft that hovers.
+    Reason prepareTaxi(BehaviorCommand& taxi, const sim::VehicleState& state, CommandResult& detail);
     /// FA's own rest of a takeoff a policy canceled on the runway (4.50): its rejection or its continuation, submitted at
     /// once on the freed axes; its activity, or 0 (Launch.cpp).
     ActivityId handOver(const BehaviorCommand& next, const sim::VehicleState& state, double now);

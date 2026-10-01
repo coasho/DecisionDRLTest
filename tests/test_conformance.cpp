@@ -642,7 +642,7 @@ public:
 
     /// What a walk draws: the later stages' capabilities where it optimises; never a ground mode - it flies (a launch: its
     /// NEW and lifecycle are test_launch.cpp's)
-    bool drawable(const CapabilityDescriptor& d) const { return (optimise || !late(d)) && d.mode != FlightMode::Launch; }
+    bool drawable(const CapabilityDescriptor& d) const { return (optimise || !late(d)) && !d.ground; }
 
     static bool isSupport(const CapabilityDescriptor& d) {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
@@ -789,7 +789,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
               ((d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior) && d.setpoint != SetpointKind::Intercept)); // (a route intercept, which a new one replaces: ADR-29 FA-8d)
         const bool primary = (d.axes & kPrimaryAxes) != 0; // flown through the cascade, or the engines' thrust beside it
         CHECK(primary == (!Maker::isSupport(d) || d.id == "fsim.flight.engines"));
-        if (d.mode == FlightMode::Launch) { // a ground mode, the vehicle flying: unavailable, and refused so (its lifecycle: test_launch.cpp)
+        if (d.ground) { // a ground mode, the vehicle flying: unavailable, and refused so (their lifecycles: test_launch.cpp, test_taxi.cpp)
             const CapabilityStatus st = w.capabilityStatus(v, d.id);
             CHECK((st.availability == Availability::TemporarilyUnavailable && st.reason == Reason::Airborne));
             BehaviorCommand b;
@@ -1346,7 +1346,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
     authority.phase.assign(w.capabilities(v).size(), CapabilityStatus{});
     for (std::size_t i = 0; i < w.capabilities(v).size(); ++i) // (it flies: a ground mode waits for the ground)
-        if (w.capabilities(v)[i].mode == FlightMode::Launch) authority.phase[i] = {Availability::TemporarilyUnavailable, Reason::Airborne};
+        if (w.capabilities(v)[i].ground) authority.phase[i] = {Availability::TemporarilyUnavailable, Reason::Airborne};
 
     for (int k = 0; k < operations; ++k) {
         if (k % 120 == 60) {

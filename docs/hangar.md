@@ -73,6 +73,7 @@ code that computes them, changes.
 | model | `<name>.glb`: the airframe as one closed solid, its moving parts on their hinges | no crack, pinch or loose piece; gear stowed inside; length, span and height against `[dimensions]` |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
 | fly | trim across the speed range; stall; climb and ceiling; top speed (a jet's also at its published height); dynamic modes; 40 runs from random states; six crashes into the ground. A fly-by-wire aircraft instead: top speed at sea level and at the published height, excess power, the ceiling at the best climb speed, sustained turn, the angle-of-attack limiter, a 3 g step from trim, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
+| ground | on its wheels, in the platform's own JSBSim: the circle it turns at 3 m/s with its steering full over each way, and the yaw acceleration its nose wheel gives it as the steering goes over - the profile's `ground_turn_radius_m` and `ground_yaw_accel_rad_s2`, which a taxi plans its corners by ([flight-autonomy.md](flight-autonomy.md), 4.51) | the radius within half to ten times the geometric one (its wheelbase over the tangent of its steering limit); on its wheels throughout |
 | calibrate | `calibration.toml`: extra drag, and the propeller pitch unless the design gives the real one; for a supersonic jet, the throttle ratio and the wave drag; for a subsonic one, where its wing's drag diverges | `[targets]` |
 | autopilot | `autopilot.toml`: the platform's control loops tuned for it, from small steps flown at a reference condition, written into `<name>.xml` as `fsim/control` properties; the aircraft then flown through standard manoeuvres at the attitude, acceleration and velocity levels at three speeds (`out/autopilot.png`) | no manoeuvre loses control at the reference speed; overshoot and height hold ([The autopilot](#the-autopilot)) |
 | report | `out/report.html` | |
@@ -332,7 +333,14 @@ stage end to end through the platform (`ctest -R hangar`).
   the main wheels to the CG. The profile gives the attitude at which the
   aircraft, pivoting on its aftmost wheels, touches the ground behind them
   (`envelope/ground_pitch_max_deg`: the E-7A's 7.3°, the Rafale's 19.6°): a
-  takeoff rotates short of it.
+  takeoff rotates short of it. It gives too the tightest circle the aircraft
+  turns on its wheels and how quickly a turn there builds, both flown by the
+  ground stage. The tyres decide them, not the geometry alone: the C-130J's
+  nose wheel at its 60° turned it on 25 m, where its wheelbase over the
+  tangent of its steering limit gives 5.6, and a heavy's nose tyre yaws its
+  inertia at 0.03 to 0.08 rad/s², most fighters' at 0.2 to 0.7 (the
+  EA-18G's, the F/A-18C's and the Su-25's at 0.05 to 0.11). Where the
+  ground stage has not flown, the profile gives the geometric radius.
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control

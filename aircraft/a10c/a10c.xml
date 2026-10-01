@@ -385,6 +385,8 @@
       <property value="55.8816">fsim/envelope/clean/cas_min_ms</property>
       <property value="7.33">fsim/envelope/clean/n_max</property>
       <property value="10.81">fsim/envelope/ground_pitch_max_deg</property>
+      <property value="3.65">fsim/envelope/ground_turn_radius_m</property>
+      <property value="0.1709">fsim/envelope/ground_yaw_accel_rad_s2</property>
       <property value="1">fsim/propulsion/version</property>
       <property value="1">fsim/propulsion/provenance</property>
       <property value="0.0">fsim/propulsion/afterburner</property>

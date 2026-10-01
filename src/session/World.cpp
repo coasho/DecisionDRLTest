@@ -319,6 +319,16 @@ const World::Entry* World::entry(std::uint32_t id) const noexcept {
     return it == idToSlot_.end() ? nullptr : entries_[it->second].get();
 }
 
+std::uint32_t World::vehicles(std::uint32_t* ids, std::uint32_t max) const noexcept {
+    std::uint32_t n = 0; // (by slot: the same order every step)
+    for (const auto& e : entries_)
+        if (e) {
+            if (n < max) ids[n] = e->info.id;
+            ++n;
+        }
+    return n;
+}
+
 const sim::VehicleState* World::vehicleState(std::uint32_t id) const noexcept {
     const Entry* e = entry(id);
     return e ? &pool_->states()[e->slot] : nullptr;

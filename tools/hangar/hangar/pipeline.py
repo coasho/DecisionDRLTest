@@ -30,8 +30,8 @@ import numpy as np
 from . import __version__
 from .geometry import Aircraft
 
-STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "autopilot", "performance", "report")
-DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "autopilot", "performance", "report")
+STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "ground", "calibrate", "autopilot", "performance", "report")
+DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "ground", "autopilot", "performance", "report")
 KT = 0.514444
 
 
@@ -608,7 +608,8 @@ class Design:
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
         profile = sections(a, fbw, reference, identified, fly_results(self.dir), performance_tables(self.dir),
-                           tail_down=jsbsim.tail_down_deg(a))
+                           tail_down=jsbsim.tail_down_deg(a), turn_radius=(self.load("ground") or {}).get("turn_radius_m", jsbsim.turn_radius_m(a)),
+                           yaw_accel=(self.load("ground") or {}).get("yaw_accel_rad_s2"))
         text = keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -841,6 +842,29 @@ class Design:
                                     "checks": checks})
 
     # -- fly ------------------------------------------------------------------------------------
+    def ground(self):
+        """On its wheels (a wing's): the circle it turns at a taxi's 3 m/s with its steering full over, each way, flown in
+        JSBSim - the profile's tightest turn there, which a taxi draws its corners wider than (flight-autonomy.md, 4.51)."""
+        from . import flight as F
+        from .jsbsim import turn_radius_m
+        a = self.aircraft
+        geometric = turn_radius_m(a)
+        if geometric is None or not a.gear:
+            return self.save("ground", {"checks": [info("tightest turn on its wheels", "none", note="no steerable wheel")]})
+        f = F.Flight(a.name, name="hangar-ground-%s" % a.name)
+        try:
+            left, wheels_l, accel_l = F.ground_turn(f, rudder=1.0)
+            right, wheels_r, accel_r = F.ground_turn(f, rudder=-1.0)
+        finally:
+            f.close()
+        radius, accel = max(left, right), min(accel_l, accel_r)
+        checks = [check("tightest turn on its wheels, 3 m/s", radius, 0.5 * geometric, 10.0 * geometric, "m",
+                        note="left %.1f m, right %.1f m; its wheelbase and steering limit give %.1f m" % (left, right, geometric)),
+                  info("its yaw acceleration on its wheels, the rudder full over", accel, "rad/s^2", note="left %.3f, right %.3f" % (accel_l, accel_r)),
+                  check("on its wheels through the turns", 1.0 if wheels_l and wheels_r else 0.0, 1.0, None)]
+        return self.save("ground", {"turn_radius_m": radius, "left_m": left, "right_m": right, "geometric_m": geometric,
+                                    "yaw_accel_rad_s2": accel, "checks": checks})
+
     def fly(self, reference=None):
         from . import flight as F
         from .report import plots

@@ -56,6 +56,16 @@ class Flight:
             v.set_protection(self.protection)
         return v
 
+    def spawn_parked(self, heading_deg=0.0):
+        """Parked on the ground, its engines idle, settled for a second."""
+        self._n += 1
+        v = self.world.create_vehicle("t%d" % self._n, type=self.type, latitude_deg=self.lat, longitude_deg=self.lon,
+                                      heading_deg=heading_deg, on_ground=True, airspeed_ms=0.0)
+        if self.protection is not None:
+            v.set_protection(self.protection)
+        self.world.step(int(round(1.0 / self.dt)))
+        return v
+
     @staticmethod
     def prop(v, name, default=float("nan")):
         try:
@@ -949,3 +959,37 @@ def fighter_tests(f, opts, quick=False, top_altitude_m=10973.0):
     out["turn"] = turn_performance(f, pilot, 4572.0, plan["turn_mach"], loads=plan["loads"])
     out["handling"] = pull_and_roll(f, pilot, 1524.0, 180.0, roll_seconds=plan["roll_seconds"])
     return out
+
+
+def ground_turn(f, speed_ms=3.0, rudder=1.0):
+    """The circle it turns on its wheels at `speed_ms` with the rudder held at `rudder` (+1: full left), the throttle and
+    the brakes holding its speed: the radius (m) at the main wheels' middle, from its speed over its yaw rate in the last
+    10 s of 40, whether it stayed on its wheels, and the yaw acceleration its nose wheel gives it as the rudder goes over -
+    the most over half a second in the first second and a half: how quickly a turn on its wheels builds (a heavy's nose
+    tyre turns its inertia slowly - the KC-135R's 0.04 rad/s^2, a fighter's 0.4 to 0.7). Not a lag to a share of the full
+    turn's yaw rate: in that tight a turn it scrubs its speed off and the throttle wins it back, and that read 12 s on the
+    EA-18G, which taxies its corners as a fighter does. A geometric radius - its wheelbase over the tangent of its steering limit - leaves out its tyres: the C-130J's nose
+    wheel at its 60 deg turned it on 20 m where the geometry gives 5.6."""
+    import math
+    v = f.spawn_parked()
+    integral, rates, speeds, wheels, rising = 0.0, [], [], True, []
+    n = int(round(0.1 / f.dt))
+    for k in range(500):  # 10 s straight to its speed, then 40 s turning
+        s = v.state
+        gs = math.hypot(s.velocity_ned_ms[0], s.velocity_ned_ms[1])
+        err = speed_ms - gs
+        integral = min(max(integral + 0.05 * err * 0.1, 0.0), 0.5)
+        thr = min(max(0.15 * err + integral, 0.0), 0.8)
+        brake = min(max(0.4 * (-err - 0.3), 0.0), 1.0) if err < -0.3 else 0.0
+        v.command_actuator(rudder=rudder if k >= 100 else 0.0, throttle=thr, gear_down=1.0, brake_left=brake, brake_right=brake)
+        f.world.step(n)
+        wheels = wheels and bool(v.state.on_ground)
+        if 100 <= k < 116:
+            rising.append(abs(v.state.angular_rate_body_rad_s[2]))
+        if k >= 400:
+            rates.append(abs(v.state.angular_rate_body_rad_s[2]))
+            speeds.append(gs)
+    rate = sum(rates) / len(rates)
+    radius = sum(speeds) / len(speeds) / rate if rate > 1e-4 else float("inf")
+    accel = max((rising[i + 5] - rising[i]) / 0.5 for i in range(len(rising) - 5))
+    return radius, wheels, accel

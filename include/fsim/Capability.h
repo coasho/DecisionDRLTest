@@ -959,6 +959,7 @@ struct CapabilityDescriptor {
     std::vector<std::string> uses;         ///< the capabilities it flies through
     std::string behavior;                  ///< guidance: the behaviour's registry id
     bool needsTarget = false;              ///< guidance: follows BehaviorCommand::target
+    bool ground = false;                   ///< guidance: flown on the ground alone (a launch, a taxi): unavailable in the air
     FlightMode mode = FlightMode::None;    ///< the A-GRA flight capability type it is
     SetpointKind setpoint = SetpointKind::Level; ///< what its command is
     std::uint8_t accepted = 0;             ///< AcceptedInterface bits
@@ -979,6 +980,8 @@ struct BehaviorTraits {
     FlightMode mode = FlightMode::None; ///< the A-GRA flight capability type it is
     /// The support axes it owns beside the primary ones (a launch: the gear, the flaps and the brakes it sets as it flies).
     AxisMask axes = 0;
+    /// Flown on the ground alone (a launch, a taxi): unavailable to a policy in the air (Reason::Airborne).
+    bool ground = false;
     /// Behavior: parameters in a BehaviorCommand. A guidance mode's fixed-size
     /// setpoint (SetpointKind::Hsa, ...) makes it a mode: it takes UPDATE.
     SetpointKind setpoint = SetpointKind::Behavior;

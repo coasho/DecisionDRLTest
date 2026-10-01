@@ -896,7 +896,15 @@ void registerBuiltinControllers(ControllerRegistry& r) {
                          {"fsim.flight.actuator", velocity, position});
     launch.mode = FlightMode::Launch;
     launch.axes = axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes);
+    launch.ground = true;
     r.addBehavior("launch", [] { return std::make_unique<LaunchBehavior>(); }, std::move(launch));
+    auto taxi = traits(Persistence::Terminating, // (A-GRA's taxi route: a waypoint following on the ground; docs/flight-autonomy.md, 4.51)
+                       {p("speed_ms", "m/s", 8.0, 1.0, 15.0)}, {"fsim.flight.actuator"});
+    taxi.mode = FlightMode::WaypointFollowing;
+    taxi.axes = axisBit(Axis::Gear) | axisBit(Axis::Brakes);
+    taxi.ground = true;
+    taxi.features = kFeatureWingborne;
+    r.addBehavior("taxi", [] { return std::make_unique<TaxiBehavior>(); }, std::move(taxi));
     auto formation = traits(Persistence::Persistent,
                             {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", now, 0.0)},
                             {velocity}, true);

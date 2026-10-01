@@ -94,7 +94,7 @@ def table_fields(tables):
     return out
 
 
-def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down=None):
+def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down=None, turn_radius=None, yaw_accel=None):
     """{section: {field: value}} for the JSBSim file.
 
     aircraft   the design (geometry.aircraft.Aircraft)
@@ -104,6 +104,8 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
     flown      the flight tests' results (fly_results), or {}
     tables     the performance tables (performance_tables), or {}
     tail_down  the pitch attitude its tail touches the ground at (jsbsim.tail_down_deg), deg, or None
+    turn_radius  its tightest turn on its wheels (the ground stage's, else jsbsim.turn_radius_m), m, or None
+    yaw_accel  the yaw acceleration its steering gives it on its wheels (the ground stage's), rad/s^2, or None
     """
     spec = aircraft.spec
     control = spec.get("flight_control", {})
@@ -158,6 +160,11 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
     # wheels (a launch rotates short of it)
     if tail_down is not None and 0.0 < tail_down < 90.0:
         envelope["ground_pitch_max_deg"] = round(tail_down, 2)
+    # and its tightest turn there (a taxi's corners are drawn wider: 4.51)
+    if turn_radius is not None and 0.0 < turn_radius < 1000.0:
+        envelope["ground_turn_radius_m"] = round(turn_radius, 2)
+    if yaw_accel is not None and 0.0 < yaw_accel < 100.0:
+        envelope["ground_yaw_accel_rad_s2"] = round(yaw_accel, 4)
     if envelope:
         out["envelope"] = envelope
 

@@ -1494,6 +1494,29 @@ class GroundGeometry(unittest.TestCase):
         e7a = jsbsim.tail_down_deg(Aircraft.load(repo("aircraft/e7a/e7a.toml")))
         self.assertTrue(6.0 < e7a < 8.5, e7a)
 
+    def test_the_tightest_turn_on_its_wheels(self):
+        # geometric: its wheelbase over the tangent of its steering limit (the U-2's 6 m to its tail wheel, 10 deg); flown,
+        # its tyres' - the ground stage's, the profile's where it has flown it (4.51)
+        from hangar import jsbsim
+        self.assertAlmostEqual(jsbsim.turn_radius_m(Aircraft(BicycleGear.u2())), 6.0 / math.tan(math.radians(10.0)), places=9)
+        from hangar import flight as F
+        f = F.Flight("c172", name="hangar-test-ground")
+        try:
+            radius, wheels, accel = F.ground_turn(f, rudder=1.0)
+        finally:
+            f.close()
+        geometric = jsbsim.turn_radius_m(Aircraft.load(repo("aircraft/c172/c172.toml")))
+        self.assertTrue(wheels)
+        self.assertTrue(0.9 * geometric < radius < 1.2 * geometric, (radius, geometric))  # (9.6 m flown, 9.4 drawn)
+        self.assertGreater(accel, 0.2)  # (0.42 rad/s^2: a light single's nose wheel turns it at once)
+
+    def test_the_profile_carries_its_ground_handling(self):
+        from hangar.profile import sections
+        p = sections(Profile().fighter(), {"options": {}}, {}, {}, {}, tail_down=15.0, turn_radius=6.7, yaw_accel=0.6987)
+        self.assertEqual((p["envelope"]["ground_pitch_max_deg"], p["envelope"]["ground_turn_radius_m"], p["envelope"]["ground_yaw_accel_rad_s2"]),
+                         (15.0, 6.7, 0.6987))
+        self.assertNotIn("ground_turn_radius_m", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
+
     def test_a_tricycles_balance(self):
         # the nose wheel's share and the tip-back angle at the parked attitude:
         # the lever rule along the ground, with a nose-high stance moving the CG aft

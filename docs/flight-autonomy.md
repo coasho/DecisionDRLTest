@@ -1354,6 +1354,24 @@ A-GRA puts "Rejected Take Off and Abort commands" among Flight Autonomy's own fu
 - **The support table:** `launch/rejected_takeoff` is supported on every wing, and not implemented on an aircraft that hovers, as `launch/runway`.
 - **Surfaces.** C++: `Reason::TakeoffRejected`, `Behavior::handOver`, `LaunchBehavior::canStop`, `CommandResult::other` on a CANCEL. The C ABI's result already carries `other`. Python: `Activity.cancel()` returns FA's own `Activity` where it hands on, else None; the reason's name "takeoff_rejected" and its A-GRA mapping.
 
+### 4.51 A-GRA's taxi route (as FA-9c builds it)
+
+A-GRA's taxi is a route of waypoints that MA sends and FA validates against the aircraft's taxi speed and turn rate, then flies on the ground. FA is assumed to brake for obstructions (VI 1.4, row 10.1; WPT-26). It is the platform behaviour `fsim.guidance.taxi`, of A-GRA's WAYPOINT_FOLLOWING type: a route on the ground. Rule R2 governs it (the aircraft stands on wheels).
+
+- **Its command:** `BehaviorCommand::points`, where it taxies in turn (their latitude and longitude; 64 at most), and `speed_ms`, its taxi speed (8 by default, 1 to 15 m/s: a faster one is refused `out_of_range`, or clamped).
+- **Its path:** from where it stands through its points, each corner drawn as an arc tangent to both its legs. The arc is a quarter wider than the aircraft's tightest turn on its wheels, and 8 m at least: the profile's `envelope/ground_turn_radius_m`, flown by hangar's ground stage ([hangar.md](hangar.md), Methods, Gear). The tyres decide that radius, not the geometry alone: the C-130J's 25 m against 5.6.
+- **Its NEW** checks the path (`CapabilityHost::prepareTaxi`, Taxi.cpp). It refuses `invalid_waypoint`, naming the point, with no points or more than 64. It refuses `invalid_waypoint` with `max_turn_rate` at a corner sharper than 170°, or a leg too short to hold the arcs at its two ends. A rotorcraft's taxi is not built (`not_implemented`): the UH-60A's runs on its wheels by its rotor.
+- **Only on the ground**, as a launch (4.49): its status is `airborne` in the air. The descriptor now says so for any capability: `CapabilityDescriptor::ground`, from `BehaviorTraits::ground`.
+- **Flown** at the actuator level, the gear down and its brakes its own:
+  - **Steering:** the nose wheel follows the path's curvature at a point ahead, with its course error and offset closed over a second's run (6 m at least). The curvature asked for is a share of its tightest turn's, the rudder's. Its yaw rate's error is damped. There is no braking on the inside: the arcs are wider than its tightest turn, and a single main wheel braked by both pedals (the U-2S's) tipped onto its nose and stuck.
+  - **Speed:** its taxi speed on the legs, slowing at 1 m/s² to each arc's speed and to a stop at its end. An arc's speed keeps its sideways acceleration within 1.5 m/s². It is also slow enough that the turn's yaw rate, building at the yaw acceleration its nose wheel gives it (the profile's `envelope/ground_yaw_accel_rad_s2`), carries it no more than 0.75 m off the arc. It holds that speed until it is back on its path, its course within 10° and its offset 1.5 m.
+  - **Preview:** the point ahead is as far ahead as half the time its yaw takes to build the arc's yaw rate, taken at the arc's speed.
+  - **Obstructions:** another vehicle on the ground within 25 m of its path ahead, as far as it could stop from its taxi speed plus 55 m, stops it 30 m short of where its path comes nearest the vehicle. It reports itself held (`kActivityClamped`) as long as the vehicle stays, and goes on when it has gone. The world tells a behaviour its vehicles (`WorldView::vehicles`).
+  - **Done:** stopped within 2 m of its last point for a second, it completes on its brakes.
+- **Why the yaw:** a heavy's nose tyre yaws its inertia slowly, at 0.03 to 0.08 rad/s² against most fighters' 0.2 to 0.7. Taken at a fighter's pace, the KC-135R swung 94° past a 90° corner at 3.4 m/s and wandered 115 m off its path. A point ahead pursued, looked for as far ahead as a heavy needs, cut a fighter's 8 m arcs 2.4 m inside.
+- **The support table:** `fsim.guidance.taxi` is supported on every wing, not implemented on a rotorcraft with wheels, and not supported without wheels (R2). A route's taxi points (`route/waypoint_type/taxi`) and FA's plans' taxi paths are FA-9d's.
+- **Surfaces.** C++: the "taxi" behaviour, `TaxiBehavior` (fsim/BuiltinControllers.h), `CapabilityHost::prepareTaxi`, `WorldView::vehicles`, `CapabilityDescriptor::ground`, the profile's `EnvelopeSection::groundTurnRadiusM` and `groundYawAccelRadS2`. No C ABI change: a behaviour and its points go by its id. Python: `Vehicle.submit_behavior("taxi", points=[...], speed_ms=)`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -3463,6 +3481,31 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - The other NEWs and updates are within −1.5 % to +3.1 % (the largest a same level update's 0.2 ns on 6.5), the micro cases within −1.0 % to +1.6 %, and −0.5 % to +0.9 % from three copies.
   - World throughput is 101.1 to 101.8 % of FA-9a's, and 100.0 to 100.1 % from three copies. Protection costs at most 0.7 %.
 - ctest: all 382 tests pass.
+
+**FA-9c, A-GRA's taxi route (WPT-26).**
+- What it built is 4.51, in C++ and Python, and hangar's ground stage. `fsim.guidance.taxi` is supported on every wing; with it, the taxi points of a route and FA's plans' taxi paths (FA-9d) have their way to be flown.
+- **Flown**, every wing parked and taxiing north 150 m, east 200, north 200 and west 150 at 8 m/s: three 90° corners, two right and one left (a probe, then `test_taxi`, `test_fleet` and the Python twin). Measured against the path as drawn, from 75 m along the first leg:
+  - in calm air, all 31 within 1.64 m of it (the U-2S; the rest within 1.27 m: the KC-46A), stopped within 0.52 m of the last point (the C-130J), in 88 s (the B-52H) to 149 s (the RC-135W);
+  - in a 10 m/s crosswind, all but the U-2S within 1.27 m; the U-2S, resting on its wingtip skid, 2.55 m;
+  - the fleet's case, all at once from their standard places: within 1.62 m (the U-2S), 1.27 (the KC-46A), 1.20 (the B-52H).
+- **An obstruction:** a C172 held on its brakes 200 m up an F-16C's path stopped it 146 m along, 54 m short, held. Removed, the F-16C went on and stopped at its point.
+- **Refused:** no points, a point back on itself (point 0, `max_turn_rate`), a corner whose 52 m arc a 40 m leg cannot hold (the B-52H's, point 1), 20 m/s under Reject (`out_of_range`); in the air, `airborne`. Its lifecycle: NEW on the primary axes, the gear and the brakes; active after a step; canceled, with nothing handed on.
+- **hangar's ground stage**, a second's flying per aircraft: the tightest turns flown are 1.7 m (the Skua) to 41.8 m (the B-52H). Most are within a quarter of the geometric radius. The C-130J (25.1 m against 5.6), the EC-130H (21.6), the C-17A (14.8 against 10.9) and the F/A-18s (3.5 and 4.8 m against 1.5) turn wider, their tyres' limit. Yaw acceleration: 0.030 (the C-130J) to 0.079 rad/s² (the RQ-4B) on the heavies, 0.054 to 0.11 on the EA-18G, the Su-25 and the F/A-18C, 0.17 to 0.70 on the rest, and 2.0 on the Skua. hangar's tests: 120, two new (the ground stage flying the C172 on 9.6 m against its 9.4 geometric; the profile's fields).
+- **Found and fixed:**
+  - Braking the inside wheel past the nose wheel's reach stopped the U-2S on its nose: its single main wheel takes both pedals. There is no inside braking now.
+  - The geometric radius sent the heavies through 8 to 10 m arcs they could not turn, 50 to 166 m off: hence the ground stage.
+  - The heavies' yaw lagged their steering by seconds, and they swung far past each corner. Their arc speed is now bounded by their yaw acceleration, and held until back on the path.
+  - The yaw's time to 63 % of a full-lock turn's rate read 12 s on the EA-18G, whose speed scrubs off in so tight a turn: the stage reads the yaw acceleration instead.
+  - A pure-pursuit point looked for that far ahead cut fighters' arcs 2.4 m inside: now the path's curvature is fed forward and its course and offset closed. A preview taken at the taxi speed, not the arc's, turned the F/A-18C in 37 m early.
+  - The discovery test's example of a feature not built yet is now the recovery (stage 10).
+- **The aircraft rebuilt:** every wing's profile, with its tightest turn and its yaw acceleration on its wheels (ground and build stages). Nothing else in their files changed.
+- **The fleet** (1,751 states as flights are judged, 2,310 as cases end): identical to FA-9b's to the bit, the new case's group aside.
+- **Unchanged, to the last bit:** the digests with protection and without, the route probe and the curve probe. The allocation gate passes.
+- **A/B throughput** against FA-9b (f0e8c2a), each build from its own directory and from three copies, in a quiet window held throughout:
+  - A behaviour's NEW is 7.7 % and 9.7 % faster, 9.6 % from three copies: `prepare` tests a behaviour's id once for the ground modes, where it compared it twice.
+  - The other NEWs and updates are within −0.8 % to +2.2 %, the micro cases within −1.7 % to +3.0 %, and −1.7 % to +1.1 % from three copies.
+  - World throughput from three copies is 99.1 to 99.7 % of FA-9b's. From one directory it read the F-16C at 96.3 %, and protection at 2.1 %, a single directory's drift (FA-6g3b's lesson).
+- ctest: all 385 tests pass.
 
 ## Appendix A: the inventory
 

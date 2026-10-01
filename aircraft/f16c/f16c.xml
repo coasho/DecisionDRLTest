@@ -343,6 +343,8 @@
       <property value="-3">fsim/envelope/clean/n_min</property>
       <property value="308">fsim/envelope/clean/roll_rate_max_deg_s</property>
       <property value="10.3">fsim/envelope/ground_pitch_max_deg</property>
+      <property value="6.71">fsim/envelope/ground_turn_radius_m</property>
+      <property value="0.6987">fsim/envelope/ground_yaw_accel_rad_s2</property>
       <property value="1">fsim/envelope/law_alpha</property>
       <property value="1">fsim/envelope/law_load_factor</property>
       <property value="1">fsim/envelope/law_roll_rate</property>

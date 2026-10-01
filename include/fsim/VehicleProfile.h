@@ -103,6 +103,11 @@ struct EnvelopeSection {
     double gearCasMaxMs = kUnknown;
     /// On its wheels: the pitch attitude its tail touches at, pivoting on its aftmost wheels (a launch rotates short of it).
     double groundPitchMaxRad = kUnknown;
+    /// On its wheels: its tightest turn, m, at the main wheels' middle (a taxi's corners are drawn wider).
+    double groundTurnRadiusM = kUnknown;
+    /// On its wheels: the yaw acceleration its steering gives it, full over, rad/s^2 - how quickly a turn there builds (a
+    /// heavy's 0.03 to 0.07, a fighter's 0.4 to 0.7).
+    double groundYawAccelRadS2 = kUnknown;
     // Limits the aircraft's own flight control law already enforces (a
     // fly-by-wire law's g and alpha limiters): protection clamps setpoints to
     // them but adds no feedback limiter of its own, so the two cannot fight.

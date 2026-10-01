@@ -240,6 +240,19 @@ def tail_down_deg(aircraft):
     return min(angles) if angles else None
 
 
+def turn_radius_m(aircraft):
+    """The tightest turn on its wheels (m), at the main wheels' middle: the wheelbase
+    from the steerable wheel(s) to the others over the tangent of its steering limit.
+    None for no steerable wheel, or a castering one (it turns by its brakes)."""
+    steer = [(g, pos) for g in aircraft.gear for _, pos in g.positions() if g.steerable and 0.0 < g.max_steer_deg < 360.0]
+    fixed = [pos for g in aircraft.gear for _, pos in g.positions() if not g.steerable]
+    if not steer or not fixed:
+        return None
+    base = abs(np.mean([p[0] for _, p in steer]) - np.mean([p[0] for p in fixed]))
+    limit = math.radians(min(g.max_steer_deg for g, _ in steer))
+    return base / math.tan(limit) if base > 0.0 else None
+
+
 def ground_reactions_xml(aircraft, mass_model):
     m, cg = mass_model.loaded()
     loads = gear_loads(aircraft, m, cg)

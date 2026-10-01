@@ -126,7 +126,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", S, 0, 0, ""}, // WPT-21 (FA-6d3)
     {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)
     {"fsim.guidance.route/metadata", "fsim.guidance.route", S, 0, 0, ""},                    // WPT-23 (FA-7a: kept with a route plan)
-    CAP("fsim.guidance.taxi", N, 9, R2, ""),                                                  // WPT-26
+    {"fsim.guidance.taxi", "fsim.guidance.taxi", S, 9, R2, "", false, nullptr, true},         // WPT-26
 
     // --- curve following ----------------------------------------------------------------------------
     CAP("fsim.guidance.curve", S, 0, 0, ""), // CRV-02, 12..14

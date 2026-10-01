@@ -8,10 +8,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace fsim::modes {
 
@@ -99,6 +102,37 @@ inline double degreesApart(double a, double b) { return std::remainder(a - b, 2.
 inline void offset(const sim::VehicleState& s, double lat0, double lon0, double& north, double& east) {
     north = (s.latitudeRad - lat0) * kEarthM;
     east = (s.longitudeRad - lon0) * kEarthM * std::cos(lat0);
+}
+
+/// A taxi's path as the host draws it (docs/flight-autonomy.md, 4.51), drawn again here: the legs through `points` (north,
+/// east; the first where it starts), each corner an arc of `radius` tangent to both legs. How far (north, east) is from it.
+inline double taxiPathDistance(const std::vector<std::pair<double, double>>& points, double radius, double north, double east) {
+    const std::size_t n = points.size() - 1;
+    std::vector<double> course(n), length(n), tangent(n + 1, 0.0), turn(n + 1, 0.0);
+    for (std::size_t k = 0; k < n; ++k) {
+        course[k] = std::atan2(points[k + 1].second - points[k].second, points[k + 1].first - points[k].first);
+        length[k] = std::hypot(points[k + 1].second - points[k].second, points[k + 1].first - points[k].first);
+    }
+    for (std::size_t j = 1; j < n; ++j) {
+        turn[j] = std::remainder(course[j] - course[j - 1], 2.0 * kPi);
+        tangent[j] = radius * std::tan(0.5 * std::abs(turn[j]));
+    }
+    double best = 1e18;
+    for (std::size_t k = 0; k < n; ++k) {
+        const double c = course[k], un = std::cos(c), ue = std::sin(c);
+        const double n0 = points[k].first + tangent[k] * un, e0 = points[k].second + tangent[k] * ue, len = length[k] - tangent[k] - tangent[k + 1];
+        const double t = std::clamp((north - n0) * un + (east - e0) * ue, 0.0, len);
+        best = std::min(best, std::hypot(north - (n0 + t * un), east - (e0 + t * ue)));
+        if (k + 1 < n && std::abs(turn[k + 1]) > 1e-9) {
+            const double side = turn[k + 1] > 0.0 ? 1.0 : -1.0, an = points[k + 1].first - tangent[k + 1] * un, ae = points[k + 1].second - tangent[k + 1] * ue;
+            const double cn = an - side * radius * ue, ce = ae + side * radius * un;
+            for (int i = 0; i <= 200; ++i) { // (the arc sampled every half percent of its sweep)
+                const double h = c + side * std::abs(turn[k + 1]) * i / 200.0;
+                best = std::min(best, std::hypot(north - (cn + side * radius * std::sin(h)), east - (ce - side * radius * std::cos(h))));
+            }
+        }
+    }
+    return best;
 }
 
 /// Ground that rises `gradient` metres per metre eastward from `longitudeRad` (flat to its west).

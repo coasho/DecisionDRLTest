@@ -1015,7 +1015,7 @@ Reason CapabilityHost::phase(const CapabilityDescriptor& d, const sim::VehicleSt
     // on the ground; the flight levels and the support effectors are offered in every phase
     static constexpr std::string_view kPlatform = "fsim.guidance.";
     if (d.kind != CapabilityKind::Guidance || d.id.compare(0, kPlatform.size(), kPlatform) != 0) return Reason::None;
-    if (d.mode == FlightMode::Launch) return state.onGround ? Reason::None : Reason::Airborne;
+    if (d.ground) return state.onGround ? Reason::None : Reason::Airborne;
     return state.onGround ? Reason::OnGround : Reason::None;
 }
 
@@ -1255,8 +1255,13 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         curveShape_ = curveShape ? *curveShape : CurveShape{};
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
     }
-    if (auto* b = std::get_if<BehaviorCommand>(&setpoint); b && b->id == "launch") // its runway, resolved whatever the range policy (4.49)
-        if (const Reason why = prepareLaunch(*b, state, detail); why != Reason::None) return why;
+    if (auto* b = std::get_if<BehaviorCommand>(&setpoint)) { // the ground modes' runway and route, whatever the range policy (4.49, 4.51)
+        if (b->id == "launch") {
+            if (const Reason why = prepareLaunch(*b, state, detail); why != Reason::None) return why;
+        } else if (b->id == "taxi") {
+            if (const Reason why = prepareTaxi(*b, state, detail); why != Reason::None) return why;
+        }
+    }
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
     std::int16_t radiusFrom = 5;
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint) - with its shape, into the scratch

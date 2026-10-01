@@ -778,6 +778,57 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         }
     }
 
+    // --- a taxi (ADR-29 FA-9c, WPT-26): parked, each wing taxies north 150 m, east 200, north 200 and west 150, within 2 m of its
+    // path - its legs, and each corner an arc a quarter wider than its tightest turn on its wheels - and stops at its end -----------
+    {
+        fleet.park();
+        const std::vector<std::pair<double, double>> path = {{0.0, 0.0}, {150.0, 0.0}, {150.0, 200.0}, {350.0, 200.0}, {350.0, 50.0}};
+        std::map<std::uint32_t, ActivityId> taxied;
+        std::map<std::uint32_t, double> worst, radius;
+        for (const auto& p : planes) {
+            if (!p.offered.count("fsim.guidance.taxi")) continue;
+            INFO(p.type << ": taxi");
+            BehaviorCommand b = behavior("taxi");
+            b.params = {{"speed_ms", 8.0}};
+            for (std::size_t i = 1; i < path.size(); ++i) {
+                PositionCommand at;
+                at.latitudeRad = p.start.latitudeRad + path[i].first / kEarthM;
+                at.longitudeRad = p.start.longitudeRad + path[i].second / (kEarthM * std::cos(p.start.latitudeRad));
+                b.points.push_back(at);
+            }
+            const CommandResult c = w.submit(p.id, b);
+            CHECK(c.accepted());
+            if (!c.accepted()) continue;
+            taxied[p.id] = c.activity, worst[p.id] = 0.0;
+            const double tightest = w.profile(p.id)->envelope.groundTurnRadiusM;
+            radius[p.id] = std::max(1.25 * (std::isfinite(tightest) ? tightest : 15.0), 8.0);
+        }
+        std::size_t live = taxied.size();
+        for (double t = 0.0; t < 300.0 && live > 0; t += 1.0)
+            fleet.fly(1.0, [&] {
+                live = 0;
+                for (const auto& [id, a] : taxied) {
+                    if (!w.activity(a)->live()) continue;
+                    ++live;
+                    const auto& p = *std::find_if(planes.begin(), planes.end(), [id = id](const Plane& x) { return x.id == id; });
+                    double north, east;
+                    offset(*w.vehicleState(id), p.start.latitudeRad, p.start.longitudeRad, north, east);
+                    if (north > 75.0 || east > 1.0) worst[id] = std::max(worst[id], taxiPathDistance(path, radius[id], north, east));
+                }
+            });
+        for (const auto& p : planes) {
+            if (!taxied.count(p.id)) continue;
+            INFO(p.type << " (" << className(p.cls) << "): taxi " << activityStateName(w.activity(taxied[p.id])->state));
+            CHECK(w.activity(taxied[p.id])->state == ActivityState::Completed);
+            CHECK(worst[p.id] < 2.0); // (the worst: the U-2S, 1.62 m; the KC-46A 1.27, the B-52H 1.20)
+            double north, east;
+            offset(*w.vehicleState(p.id), p.start.latitudeRad, p.start.longitudeRad, north, east);
+            CHECK(std::hypot(north - 350.0, east - 50.0) < 1.0);
+            CHECK(w.vehicleState(p.id)->onGround);
+            fleet.covered(p, "fsim.guidance.taxi");
+        }
+    }
+
     // --- guidance ------------------------------------------------------------------------------------
     // a new heading, a quarter turn right, and a new altitude: a wing 200 m higher - the fleet climb case (ADR-29
     // FA-3d): energy management keeps its calibrated airspeed at 1.1 times its least or more, where a C172 once

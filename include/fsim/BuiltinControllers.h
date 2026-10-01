@@ -7,6 +7,7 @@
 #include "fsim/Export.h"
 #include "fsim/Pid.h"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <utility>
@@ -432,6 +433,48 @@ private:
     double lastS_ = -1.0;
     double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0;
     bool gearUp_ = false, flapsUp_ = false;
+};
+
+/// "taxi": A-GRA's taxi route, flown on the ground (docs/flight-autonomy.md, 4.51; WPT-26). points: where it taxies, in turn
+/// (BehaviorCommand::points: their latitude and longitude); params: speed_ms (8: its taxi speed, 1 to 15). The host checks
+/// the route at the NEW against the aircraft's tightest turn on its wheels and draws each corner as an arc wider than that;
+/// the behaviour steers its nose wheel along the legs and arcs, slows for the arcs and for the end, stops short of another
+/// vehicle in its way (its constraints say so while it waits), and completes stopped at the last point.
+class FSIM_API TaxiBehavior final : public Behavior {
+public:
+    static constexpr std::size_t kMaxPoints = 64;
+    /// A piece of its path: a leg from (n0, e0) on `course`, or an arc round (cn, ce) of `radius`, turning right where
+    /// `right`, from `course` - each `length` long, beginning `s` along the path.
+    struct Piece {
+        bool arc = false, right = false;
+        double n0 = 0.0, e0 = 0.0, course = 0.0, cn = 0.0, ce = 0.0, radius = 0.0, length = 0.0, s = 0.0;
+    };
+
+    const char* id() const noexcept override { return "taxi"; }
+    void start(const ControlContext& ctx, const BehaviorCommand& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override { return done_; }
+    std::uint16_t constraints() const noexcept override { return held_ ? kActivityClamped : 0; }
+    bool progress(ActivityProgress& out) const noexcept override;
+
+    /// Its path, as the host drew it: `pieces`, from its start (north, east metres from (lat0, lon0)).
+    std::size_t pieces() const noexcept { return count_; }
+    const Piece& piece(std::size_t i) const noexcept { return path_[i]; }
+    double length() const noexcept { return count_ ? path_[count_ - 1].s + path_[count_ - 1].length : 0.0; }
+    /// Where `s` along its path is (north, east) and its course there.
+    void at(double s, double& north, double& east, double& course) const noexcept;
+
+private:
+    double nearest(double north, double east, double& cross) noexcept; ///< along the path, from where it is; across it (+ right)
+    double curvature(double s) const noexcept;                          ///< its path's at `s` along it (+ right)
+    double obstructed(const ControlContext& ctx, double along) const noexcept; ///< how far along the path another vehicle stands; inf none
+
+    std::array<Piece, 2 * kMaxPoints + 1> path_{};
+    std::size_t count_ = 0, at_ = 0;
+    double lat0_ = 0.0, lon0_ = 0.0, speedMs_ = 8.0, turnMs_ = 5.0, turnRadiusM_ = 15.0, tightestM_ = 15.0, yawAccel_ = 0.1;
+    double alongM_ = 0.0, crossM_ = 0.0, throttleI_ = 0.0, lastS_ = -1.0, stoppedS_ = 0.0;
+    bool done_ = false, held_ = false;
 };
 
 /// "formation": hold a slot relative to `target` (leader). params: ahead_m,

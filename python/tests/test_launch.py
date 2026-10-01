@@ -97,6 +97,21 @@ class LaunchTest(unittest.TestCase):
         self.assertEqual((a.info.state, a.info.reason), (fsim.ActivityState.FAILED, "takeoff_rejected"))
         self.assertLess(math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1]), 0.5)
 
+    def test_a_taxi(self):
+        # north 150 m, east 200: within 2 m of its path, stopped at its end (4.51); a corner it cannot turn refused
+        w = world("py-taxi")
+        v, lat0, lon0 = parked(w, "c172")
+        at = lambda n, e: (lat0 + n / R, lon0 + e / (R * math.cos(lat0)), 0.0, math.nan, 5.0)  # noqa: E731
+        a = v.submit_behavior("taxi", points=[at(150.0, 0.0), at(150.0, 200.0)], speed_ms=8.0)
+        fly(w, a, 120)
+        self.assertEqual(a.info.state, fsim.ActivityState.COMPLETED)
+        s = v.state
+        self.assertLess(math.hypot((s.latitude_rad - lat0) * R - 150.0, (s.longitude_rad - lon0) * R * math.cos(lat0) - 200.0), 1.0)
+        self.assertEqual(v.support("fsim.guidance.taxi").support, fsim.Support.SUPPORTED)
+        with self.assertRaises(fsim.Rejected) as refused:  # back on itself at its first point
+            v.submit_behavior("taxi", points=[at(300.0, 200.0), at(200.0, 200.0)])
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 0))
+
     def test_refusals(self):
         w = world("py-launch-refused")
         v, _, _ = parked(w, "c172")

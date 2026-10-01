@@ -445,6 +445,7 @@ public:
     bool navigation(std::uint32_t id, control::NavigationReport& out) const noexcept override;
     void setEnvironment(const sim::EnvironmentState& environment);
     double simTime() const noexcept override { return simTime_; }
+    std::uint32_t vehicles(std::uint32_t* ids, std::uint32_t max) const noexcept override;
     double dt() const noexcept { return options_.dt; }
     int frameSkip() const noexcept { return options_.frameSkip; }
     comm::Network& network() noexcept { return network_; }
@@ -498,6 +499,7 @@ private:
         const sim::VehicleState* vehicleState(std::uint32_t id) const noexcept override;
         double simTime() const noexcept override { return world_.simTime_; }
         const sim::EnvironmentState& environment() const noexcept override { return world_.environment_; }
+        std::uint32_t vehicles(std::uint32_t* ids, std::uint32_t max) const noexcept override { return world_.vehicles(ids, max); }
         /// Its own report, for the vehicle whose control update asks (4.37: a route's branch).
         bool navigation(std::uint32_t id, control::NavigationReport& out) const noexcept override { return world_.navigation(id, out); }
 

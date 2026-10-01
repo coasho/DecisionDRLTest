@@ -1323,6 +1323,12 @@ public:
         (void)id, (void)out;
         return false;
     }
+    /// The vehicles in the world: as many of their ids as fit into `ids` (`max`), and how many there are; 0 where it tells
+    /// none. A taxi looks along its path for what stands in its way (docs/flight-autonomy.md, 4.51).
+    virtual std::uint32_t vehicles(std::uint32_t* ids, std::uint32_t max) const noexcept {
+        (void)ids, (void)max;
+        return 0;
+    }
 };
 
 /// What a controller sees each update (design 9.3 "ControlContext").
