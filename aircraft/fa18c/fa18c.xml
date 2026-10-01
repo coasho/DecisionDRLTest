@@ -408,7 +408,7 @@
       <property value="0.0966993">fsim/plant/yaw/gain</property>
       <property value="1">fsim/performance/version</property>
       <property value="1">fsim/performance/provenance</property>
-      <property value="18292.3">fsim/performance/ceiling_m</property>
+      <property value="18297.3">fsim/performance/ceiling_m</property>
       <property value="257.993">fsim/performance/climb_ms</property>
       <property value="380.571">fsim/performance/max_tas_ms</property>
       <property value="1">fsim/applicability/version</property>

@@ -235,8 +235,9 @@ class Autopilot:
     level (aileron) and no sideslip (rudder), throttle as set - plain
     PIDs in normalised commands, enough to fly the tests steadily."""
 
-    def __init__(self, dt, theta0_deg, throttle=0.0, flaps=0.0):
+    def __init__(self, dt, theta0_deg, throttle=0.0, flaps=0.0, integral=0.6):
         self.dt = dt
+        self.integral = integral  # the pitch integrator's most (of the stick)
         self.theta_cmd = theta0_deg
         self.throttle = throttle
         self.flaps = flaps
@@ -248,7 +249,7 @@ class Autopilot:
         theta = math.degrees(s.euler_rad[1])
         q = math.degrees(s.angular_rate_body_rad_s[1])
         err = theta_cmd - theta
-        self.i_theta = float(np.clip(self.i_theta + err * self.dt * 0.02, -0.6, 0.6))
+        self.i_theta = float(np.clip(self.i_theta + err * self.dt * 0.02, -self.integral, self.integral))
         return float(np.clip(-(0.06 * err + self.i_theta) + 0.025 * q, -1, 1))  # nose up = negative elevator
 
     def altitude(self, s, h_ref):
@@ -290,7 +291,7 @@ def _stall_break(h, dt):
     return len(t) - 1, None
 
 
-def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0, until_s=480.0):
+def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, gear=False, power=0.0, max_s=90.0, until_s=480.0):
     """The 1-g stall: the autopilot holds the height at idle power, so the
     speed bleeds off at about 1 kt/s and the angle of attack rises. The stall
     is the break: the angle of attack stops rising and falls back, or the
@@ -299,11 +300,24 @@ def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0, until_s=48
     highest CL (from the load factor) up to just after it. A heavy jet at
     idle bleeds its speed off far more slowly (a B-52 at half a knot a
     second): with no break in max_s the run goes on, 30 s at a time, until
-    it breaks, up to until_s."""
+    it breaks, up to until_s. gear: its gear down first (a landing's
+    configuration, with flaps); power: a share of its trim's throttle held,
+    not idle (its landing configuration's drag at idle bled its speed so
+    fast the height hold sank past the break long before its wing stalled)."""
     v = f.spawn(altitude_m, start_ms or 40.0)
-    tr = f.trim(v, flaps=flaps)
-    ap = Autopilot(f.dt, tr["pitch_deg"], throttle=0.0, flaps=flaps)
+    if gear:  # flown level while its gear and flaps come down, then trimmed there (left alone, they upset it)
+        v.command_actuator(gear_down=1.0, flaps=flaps)
+        tr = f.fly_trim(v, flaps)
+    else:
+        tr = f.trim(v, flaps=flaps)
+    ap = Autopilot(f.dt, tr["pitch_deg"], throttle=power * float(tr["throttle"]), flaps=flaps, integral=1.6 if gear else 0.6)
     ap.i_outer = tr["pitch_deg"]
+    if gear:
+        # the flown trim's elevator moved from the pitch trim into the integrator: summed with the autopilot's stick,
+        # clipped at full, the KC-135R's +0.73 nose down left it a quarter of its elevator to raise the nose with, and it
+        # "stalled" at 5 deg sinking
+        ap.i_theta = -f.prop(v, "fcs/pitch-trim-cmd-norm")
+        v.set_property("fcs/pitch-trim-cmd-norm", 0.0)
 
     def control(t, s, veh):
         ap.command(veh, s, ap.altitude(s, altitude_m))
@@ -322,6 +336,17 @@ def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0, until_s=48
     return {"stall_kcas": float(h["kcas"][i_min]), "stall_tas_ms": float(h["tas"][i_min]),
             "cl_max": float(np.max(h["cl"][int(3.0 / f.dt): j + 1])), "alpha_at_stall": float(np.max(a[: j + 1])),
             "time_s": float(t[brk]), "break": why if brk < len(t) - 1 else "none", "trim": tr}, h
+
+
+def approach_attitude(f, speed_ms, flaps=1.0, gear=True, altitude_m=100.0, glide_deg=3.0):
+    """The pitch attitude it comes down a glide slope at, at speed_ms (true) in its landing configuration: trimmed level
+    there by flying, less the slope (docs/flight-autonomy.md, 4.63)."""
+    v = f.spawn(altitude_m, speed_ms)
+    if gear:
+        v.command_actuator(gear_down=1.0, flaps=flaps)
+    tr = f.fly_trim(v, flaps)
+    v.remove()
+    return float(tr["pitch_deg"]) - glide_deg
 
 
 def climb(f, altitude_m, speed_ms, seconds=45.0):

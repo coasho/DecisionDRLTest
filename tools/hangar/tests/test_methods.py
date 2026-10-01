@@ -2494,6 +2494,23 @@ class Profile(unittest.TestCase):
         self.assertEqual(p["performance"]["stall_cas_ms"], 100.0 * KT)
         self.assertEqual(p["performance"]["ceiling_m"], 9000.0)
 
+    def test_its_landing_configuration(self):
+        # docs/flight-autonomy.md, 4.63: its stall with its flaps all out and its gear down, where that is slower than clean and
+        # 1.3 times it leaves APPROACH_ROOM_DEG under its tail's touching on the glide slope; a published approach speed as
+        # its design records it
+        from hangar.profile import APPROACH_ROOM_DEG, KT, sections
+        spec = {"aircraft": {"category": "transport"}, "flight_control": {"type": "direct"}}
+        design = self.Design(spec, ["aileron", "elevator", "rudder", "flap"], [self.Gear(True)], [self.Engine("turbofan", 4)])
+        flown = {"stall": {"stall_kcas": 120.0}, "stall_landing": {"stall_kcas": 95.0, "approach_pitch_deg": 2.0}}
+        perf = lambda f, tail=10.0: sections(design, None, {}, {}, f, tail_down=tail)["performance"]  # noqa: E731
+        self.assertAlmostEqual(perf(flown)["stall_flaps_cas_ms"], 95.0 * KT)
+        self.assertNotIn("stall_flaps_cas_ms", perf(flown, tail=2.0 + APPROACH_ROOM_DEG - 0.1))  # no room under its tail
+        self.assertNotIn("stall_flaps_cas_ms", perf(dict(flown, stall_landing={"stall_kcas": 130.0})))  # not slower
+        self.assertNotIn("stall_flaps_cas_ms", perf({"stall": {"stall_kcas": 120.0}}))  # none flown
+        self.assertNotIn("approach_cas_ms", perf(flown))
+        design.spec["operations"] = {"approach_kt": 135}
+        self.assertAlmostEqual(perf(flown)["approach_cas_ms"], round(135 * KT, 2))
+
     def test_the_sections_as_properties(self):
         from hangar.profile import properties_xml, sections
         xml = properties_xml(sections(self.fighter(), {"options": {}}, {}, {}, {}))

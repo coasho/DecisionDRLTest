@@ -471,6 +471,11 @@ void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {
         IC->SetAltitudeAGLFtIC(units::metresToFeet(kGroundSpawnCgHeightM));
     } else {
         IC->SetAltitudeASLFtIC(units::metresToFeet(ic.altitudeMslM));
+        // flying: its gear up, where its command puts it (a load's model has it down, and it took 5 s to come up - with its
+        // drag, the first seconds of every start in the air: docs/flight-autonomy.md, 4.62)
+        auto pm = fdm_->GetPropertyManager();
+        for (const char* path : {"gear/gear-cmd-norm", "gear/gear-pos-norm"})
+            if (auto* n = pm->GetNode(path)) n->setDoubleValue(0.0);
     }
 }
 

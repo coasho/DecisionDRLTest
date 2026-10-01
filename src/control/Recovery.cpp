@@ -186,7 +186,16 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
         // at the intermediate fix, level to the final approach fix, then down the glide slope to its aim on the runway - the
         // threshold crossed 15 m up
         if (!takeoffSpeeds(line)) return detail.index = 0, Reason::NotImplemented; // (no speed to land at: a stock model's)
-        const double vapp = line.climbCasMs;
+        // its published final approach speed where its design records one; else 1.3 times its stall in its landing
+        // configuration - its flaps all out, its gear down - where it has one its flaps' placard admits (4.63; the C-17A's
+        // would be over it, its powered lift not modelled); else clean: 20 to 40 kt above the reference speeds its type
+        // lands at (the KC-135R 178 kt against 130 to 140)
+        double vapp = line.climbCasMs;
+        if (profile_) {
+            const double landing = 1.3 * profile_->performance.stallFlapsCasMs;
+            if (landing < vapp && !(landing > profile_->envelope.flaps.casMaxMs)) vapp = landing;
+            if (profile_->performance.approachCasMs > 0.0) vapp = profile_->performance.approachCasMs;
+        }
         const WindEstimate wind = checkWind(state);
         const double vfix = kManoeuvreShare * vapp, ground = vfix + std::hypot(wind.northMs, wind.eastMs);
         const double radius = ground * ground / (9.80665 * std::tan(kApproachBankRad));

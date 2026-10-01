@@ -153,6 +153,7 @@ public:
     double rollGain = 2.0;         ///< "roll.gain": rad/s of roll rate per rad of bank error
     double rollDamping = 0.0;      ///< "roll.kd": rad/s of roll rate less per rad/s flown
     double maxRollRateRadS = 1.5;  ///< "roll.max_rate": the bank setpoint's slew
+    double rollLagS = 0.0;         ///< "roll.lag_s": the roll rate's lag the bank's poles are placed on, as pitchLagS's
     double headingGain = 1.5;      ///< "heading.gain": rad of bank per rad of heading error (at the reference speed)
     Pid pitch{1.0, 0.1, 0.0, 0.1, -0.35, 0.35};   ///< "pitch.*": the pitch rate, rad/s, a pitch error asks (kd on the pitch's rate)
     /// "pitch.lag_s": the load factor's lag at the schedule's reference (the allocation's, as identified), the pitch's

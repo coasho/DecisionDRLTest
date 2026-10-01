@@ -123,7 +123,7 @@ std::vector<ControllerSetting> designLaws(const VehicleProfile& p) {
     set(pa, "pitch.kp", kTheta), set(pa, "pitch.kd", dTheta), set(pa, "pitch.ki", kTheta * wTheta / 8.0);
     set(pa, "pitch.integral_limit", 0.1);
     // and the lag they are placed on, to place them again where the lag is longer (docs/flight-autonomy.md, 4.60)
-    set(pa, "pitch.lag_s", tn), set(pa, "schedule.eas_ms", eas);
+    set(pa, "pitch.lag_s", tn), set(pa, "roll.lag_s", tp), set(pa, "schedule.eas_ms", eas);
     set(pa, "airspeed.kp", wV), set(pa, "airspeed.ki", wV * wV / 4.0), set(pa, "airspeed.integral_limit", 2.0);
     // the allocation's thrust: the throttle an acceleration needs, from the identified response
     set(n, "longitudinal.feedforward", 1.0 / gv);

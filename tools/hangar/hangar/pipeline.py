@@ -1167,6 +1167,15 @@ class Design:
             r["max_speed_ms"] = F.max_level_speed(r["trim_sweep"])
         r["stall"] = {k: v for k, v in stall_sl.items() if k != "trim"}
         r["stall_1500"] = {k: v for k, v in stall_hi.items() if k != "trim"}
+        # in its landing configuration - its flaps all out, its gear down - what its approach speed is from
+        # (docs/flight-autonomy.md, 4.63)
+        if "flap" in self.aircraft.channels():
+            gear = any(g.retractable for g in self.aircraft.gear)
+            stall_land, _ = F.stall(f, altitude_m=100.0, start_ms=1.3 * vs0, flaps=1.0, gear=gear, power=0.5)
+            r["stall_landing"] = {k: v for k, v in stall_land.items() if k != "trim"}
+            # and the attitude it would come down the glide slope at, 1.3 times that: the room it leaves under its tail
+            if np.isfinite(stall_land["stall_tas_ms"]):
+                r["stall_landing"]["approach_pitch_deg"] = F.approach_attitude(f, 1.3 * stall_land["stall_tas_ms"], gear=gear)
         # a jet (direct controls: a transport) climbs best faster than a
         # propeller does, and its top speed is published at altitude
         jet = any(e.type == "turbofan" for e in self.aircraft.engines)

@@ -84,10 +84,11 @@ bool CapabilityHost::onRunway(const RouteGround& line, const sim::VehicleState& 
 }
 
 bool CapabilityHost::takeoffSpeeds(RouteGround& out) const noexcept {
-    // a wing's rotation and climb speeds: 1.1 and 1.3 times its stall speed with its flaps out (else clean; else the
-    // envelope's least - a fly-by-wire fighter's, whose limiter keeps it from stalling); false with none (a stock model's)
+    // a wing's rotation and climb speeds: 1.1 and 1.3 times its stall speed clean (its takeoff flaps' lift a margin; its
+    // landing configuration's stall is its approach's: 4.63), else the envelope's least - a fly-by-wire fighter's, whose
+    // limiter keeps it from stalling; false with none (a stock model's)
     double stall = kHold;
-    if (profile_) stall = std::isfinite(profile_->performance.stallFlapsCasMs) ? profile_->performance.stallFlapsCasMs : profile_->performance.stallCasMs;
+    if (profile_) stall = profile_->performance.stallCasMs;
     if (!std::isfinite(stall)) stall = performance_.minCasMs;
     if (!std::isfinite(stall)) return false;
     out.rotationCasMs = 1.1 * stall, out.climbCasMs = 1.3 * stall;

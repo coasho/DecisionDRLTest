@@ -175,6 +175,55 @@ TEST_CASE("the pitch's poles are placed again where the load factor lags longer"
     CHECK(std::abs(q(100.0) - plain) < 1e-12);
 }
 
+TEST_CASE("the bank's poles are placed again where the roll rate lags longer", "[control]") {
+    // docs/flight-autonomy.md, 4.63: as the pitch's (4.60) - the B-52H at its landing configuration's speed, 63 m/s, weaved
+    // 80 m about the centre line on the reference's and went around
+    PseudoAttitudeLoop loop;
+    loop.rollGain = 1.2, loop.rollDamping = 0.3, loop.maxRollRateRadS = 100.0;
+    loop.rollLagS = 0.4, loop.schedule.tasMs = loop.schedule.easMs = 150.0;
+    sim::VehicleState s = levelFlight(150.0);
+    s.airspeedCalibratedMs = 150.0, s.angularRateBodyRadS[0] = 0.05;
+    Rng rng{1};
+    ControlContext ctx{7, s, s, 0.01, nullptr, &rng};
+    auto p = [&](double tas) {
+        loop.reset();
+        s.airspeedTrueMs = s.airspeedCalibratedMs = s.velocityBodyMs[0] = s.velocityNedMs[0] = tas;
+        return std::get<AccelerationCommand>(loop.update(ctx, AttitudeCommand{0.2, 0.0})).rollRateRadS;
+    };
+    const double plain = 1.2 * 0.2 - 0.3 * 0.05;
+    CHECK(std::abs(p(150.0) - plain) < 1e-12);
+    CHECK(std::abs(p(200.0) - plain) < 1e-12);
+    const double lag = 1.5, kd = std::max(0.3, 1.6 * std::sqrt(1.2 / 0.4) * 0.4 * lag - 1.0);
+    CHECK(std::abs(p(100.0) - (lag * 1.2 * 0.2 - kd * 0.05)) < 1e-12);
+    loop.rollLagS = 0.0;
+    CHECK(std::abs(p(100.0) - plain) < 1e-12);
+}
+
+TEST_CASE("the speed loops integrate no further against a stopped throttle", "[control]") {
+    // docs/flight-autonomy.md, 4.63: fast at idle for 50 s, the U-2S's speed loops wound to their most and held its throttle at
+    // idle 30 s into being slow, and it went around. Against a throttle at idle (or full), neither integrates that way
+    sim::VehicleState s = levelFlight(60.0);
+    Rng rng{1};
+    ControlContext ctx{7, s, s, 0.01, nullptr, &rng};
+    PseudoAttitudeLoop attitude;
+    attitude.airspeed.ki = 0.5;
+    s.throttlePosition[0] = 0.0; // at idle, and too fast: no further
+    attitude.update(ctx, AttitudeCommand{0.0, 0.0, kHold, 0.785, kHold, 55.0});
+    CHECK(attitude.airspeed.integral == 0.0);
+    attitude.update(ctx, AttitudeCommand{0.0, 0.0, kHold, 0.785, kHold, 65.0}); // too slow: it integrates
+    CHECK(attitude.airspeed.integral > 0.0);
+    s.throttlePosition[0] = 1.0; // at full, and too slow: no further
+    const double held = attitude.airspeed.integral;
+    attitude.update(ctx, AttitudeCommand{0.0, 0.0, kHold, 0.785, kHold, 65.0});
+    CHECK(attitude.airspeed.integral == held);
+    AccelerationLoop accel;
+    accel.longitudinal.ki = 0.5;
+    accel.update(ctx, AccelerationCommand{1.0, 0.0, -50.0, kHold}); // asks for idle and less: clamped, no further
+    CHECK(accel.longitudinal.integral == 0.0);
+    accel.update(ctx, AccelerationCommand{1.0, 0.0, 0.5, kHold});
+    CHECK(accel.longitudinal.integral > 0.0);
+}
+
 TEST_CASE("registry has the built-ins and accepts user controllers", "[control]") {
     auto& r = ControllerRegistry::instance();
     for (const char* id : {"actuator", "pid_attitude", "pid_acceleration", "pid_velocity", "pid_position"}) REQUIRE(r.create(id) != nullptr);

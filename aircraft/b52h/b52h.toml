@@ -515,6 +515,11 @@ crosswind_kt = 41
 # beyond flaps_above (the setting before its landing flaps), KIAS - or why there
 # are none. Source: none found.
 placards_unknown = "neither: its flight manual is not public and no other public source gives them (its Fowler flaps have two positions)"
+# Its final approach speed (docs/flight-autonomy.md, 4.63): its best flare speed, 135 KIAS at airbrakes 4 at a typical
+# landing weight (the B-52 Stratofortress Association's forum, its T.O. figures). Its model's stall with its flaps out,
+# 95 KCAS, would put it at 123 KCAS: at idle it gained speed down the glide slope, its airbrakes - spoilers - dumped its
+# lift, and it went around.
+approach_kt = 135
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

@@ -388,6 +388,7 @@
       <property value="3961.77">fsim/performance/ceiling_m</property>
       <property value="63.1176">fsim/performance/max_tas_ms</property>
       <property value="25.4185">fsim/performance/stall_cas_ms</property>
+      <property value="23.4434">fsim/performance/stall_flaps_cas_ms</property>
       <property value="1">fsim/applicability/version</property>
       <property value="1">fsim/applicability/provenance</property>
       <property value="0.0">fsim/applicability/aerobatic</property>

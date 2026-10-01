@@ -117,6 +117,7 @@ const Field kFields[] = {
 
     {"performance", "stall_cas_ms", Kind::Real, 0, 1000, 1, AT(performance.stallCasMs)},
     {"performance", "stall_flaps_cas_ms", Kind::Real, 0, 1000, 1, AT(performance.stallFlapsCasMs)},
+    {"performance", "approach_cas_ms", Kind::Real, 0, 1000, 1, AT(performance.approachCasMs)},
     {"performance", "max_tas_ms", Kind::Real, 0, 2000, 1, AT(performance.maxTasMs)},
     {"performance", "ceiling_m", Kind::Real, 0, 40000, 1, AT(performance.ceilingM)},
     {"performance", "climb_ms", Kind::Real, 0, 1000, 1, AT(performance.climbMs)},

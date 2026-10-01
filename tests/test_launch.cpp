@@ -55,10 +55,11 @@ BehaviorCommand launch(double airfield = 7.0, double runway = 3.0) {
     return b;
 }
 
-/// The speed the host rotates a wing at: 1.1 times its stall with flaps (else clean; else its least).
+/// The speed the host rotates a wing at: 1.1 times its stall clean (its landing configuration's is its approach's:
+/// docs/flight-autonomy.md, 4.63), else its least.
 double rotationSpeed(session::World& w, std::uint32_t id) {
     const VehicleProfile* p = w.profile(id);
-    double stall = std::isfinite(p->performance.stallFlapsCasMs) ? p->performance.stallFlapsCasMs : p->performance.stallCasMs;
+    double stall = p->performance.stallCasMs;
     if (!std::isfinite(stall)) stall = w.performance(id)->minCasMs;
     return 1.1 * stall;
 }

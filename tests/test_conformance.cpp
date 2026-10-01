@@ -1130,8 +1130,12 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             break;
         case ActivityState::Failed:
             CHECK(r.by == 0);
-            // (a pattern's too, whose point is in the frame of a vehicle gone: ADR-29 FA-5c)
-            if (r.reason == Reason::TargetLost) CHECK((caps[r.capability].needsTarget || caps[r.capability].setpoint == SetpointKind::Pattern));
+            // (a pattern's too, whose point is in the frame of a vehicle gone: ADR-29 FA-5c - and a route's, a must fly's or a
+            // curve's, whose points are: 4.29)
+            if (r.reason == Reason::TargetLost)
+                CHECK((caps[r.capability].needsTarget || caps[r.capability].setpoint == SetpointKind::Pattern ||
+                       caps[r.capability].setpoint == SetpointKind::Route || caps[r.capability].setpoint == SetpointKind::Curve ||
+                       caps[r.capability].setpoint == SetpointKind::MustFly));
             if (const ActivityRecord* old = was(id); r.reason == Reason::TimeConstraint && old && old->live()) {
                 // a window it had to meet, missed as it ended: disabled, or waiting, past its end window
                 // (or its critical start's) - or started as the operation went and done before its critical
@@ -1288,6 +1292,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     for (const auto& [id, r] : after) {
         if (!r.live()) continue;
         const TimeWindow& t = r.window;
+        // (one that has flown: sent back to wait, its start window is met - only a first start is held to it, 4.10)
+        const std::string flew = "~flew " + std::to_string(id);
+        if (r.state == ActivityState::Active) ++seen[flew];
+        const bool resumed = seen.count(flew) != 0;
         if (r.state == ActivityState::Disabled) { // kept, flying nothing, until enabled or its end window closes (4.10)
             CHECK_FALSE(done.now >= t.endNotAfter);
             ++seen["disabled"];
@@ -1301,7 +1309,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         INFO("waiting " << serialOf(id) << " " << activityWaitName(r.waiting));
         CHECK(r.state == ActivityState::Pending);
         CHECK_FALSE(done.now >= t.endNotAfter);
-        CHECK_FALSE((t.startCritical() && done.now > t.startNotAfter));
+        CHECK_FALSE((!resumed && t.startCritical() && done.now > t.startNotAfter));
         if (r.waiting == ActivityWait::Scheduled) {
             CHECK(done.now < t.startNotBefore);
             CHECK(r.waitingFor == 0);

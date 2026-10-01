@@ -17,6 +17,7 @@ namespace fsim::control {
 namespace {
 
 constexpr double kG = 9.80665;
+constexpr double kThrottleStopShare = 0.005; // a throttle this near idle or full: stopped against it (anti-windup, 4.63)
 
 double clamp11(double v) noexcept { return std::clamp(v, -1.0, 1.0); }
 
@@ -141,6 +142,7 @@ PseudoAttitudeLoop::PseudoAttitudeLoop() {
     params_.add("pitch.integral_limit", &pitch.integralLimit);
     params_.add("pitch.max_rate", &pitch.outMax);
     params_.add("pitch.lag_s", &pitchLagS);
+    params_.add("roll.lag_s", &rollLagS);
     params_.add("airspeed.kp", &airspeed.kp); params_.add("airspeed.ki", &airspeed.ki);
     params_.add("airspeed.integral_limit", &airspeed.integralLimit);
     params_.add("schedule.tas_ms", &schedule.tasMs);
@@ -170,7 +172,11 @@ Command PseudoAttitudeLoop::update(const ControlContext& ctx, const Command& in)
             haveRef_ = true;
         }
         rollRef_ = rateLimit(rollRef_, rollTarget, maxRollRateRadS, ctx.dt);
-        out.rollRateRadS = std::clamp(rollGain * geo::wrapPi(rollRef_ - rollNow) - rollDamping * s.angularRateBodyRadS[0], -2.0 * maxRollRateRadS,
+        // the bank's poles placed again where the roll rate lags longer, as the pitch's are (below; 4.60, 4.63)
+        double kp = rollGain, kd = rollDamping;
+        if (const double lag = rollLagS > 0.0 ? schedule.factor(s, 2.0, -1.0) : 1.0; lag > 1.0)
+            kd = std::max(kd, 1.6 * std::sqrt(std::max(kp, 0.0) / rollLagS) * rollLagS * lag - 1.0), kp *= lag;
+        out.rollRateRadS = std::clamp(kp * geo::wrapPi(rollRef_ - rollNow) - kd * s.angularRateBodyRadS[0], -2.0 * maxRollRateRadS,
                                       2.0 * maxRollRateRadS);
     } else {
         haveRef_ = false; // someone else flies it: start afresh when it comes back
@@ -205,8 +211,16 @@ Command PseudoAttitudeLoop::update(const ControlContext& ctx, const Command& in)
     }
     // thrust: the airspeed error to an acceleration along the path, or the throttle as given
     if (ctx.engaged & axisBit(Axis::Thrust)) {
-        if (!isHold(c.airspeedMs)) out.longitudinalMs2 = airspeed.update(c.airspeedMs - s.airspeedTrueMs, 0.0, ctx.dt);
-        else out.throttle = c.throttle; // may be kHold: the stack keeps the last value
+        if (!isHold(c.airspeedMs)) {
+            // not integrated further while the throttle can give no more that way, at idle or full (4.63): fast at idle for
+            // 50 s, the U-2S's wound to its most and held its throttle at idle 30 s into being slow, and it went around
+            const double error = c.airspeedMs - s.airspeedTrueMs, before = airspeed.integral, throttle = s.throttlePosition[0];
+            out.longitudinalMs2 = airspeed.update(error, 0.0, ctx.dt);
+            if ((error < 0.0 && throttle <= kThrottleStopShare) || (error > 0.0 && throttle >= 1.0 - kThrottleStopShare))
+                airspeed.integral = before;
+        } else {
+            out.throttle = c.throttle; // may be kHold: the stack keeps the last value
+        }
     } else {
         airspeed.reset();
     }
@@ -268,12 +282,15 @@ Command AccelerationLoop::update(const ControlContext& ctx, const Command& in) {
         out.aileron = out.rudder = kHold;
     }
     if (ctx.engaged & axisBit(Axis::Thrust)) {
-        if (!isHold(c.longitudinalMs2))
-            out.throttle = std::clamp(throttleFeedforward + longitudinalFeedforward * c.longitudinalMs2 +
-                                          longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt),
-                                      0.0, 1.0);
-        else
+        if (!isHold(c.longitudinalMs2)) {
+            // its integral held while the throttle is stopped against the way it would push it (4.63)
+            const double error = c.longitudinalMs2 - s.accelerationBodyMs2[0], before = longitudinal.integral;
+            const double raw = throttleFeedforward + longitudinalFeedforward * c.longitudinalMs2 + longitudinal.update(error, 0.0, ctx.dt);
+            if ((raw < 0.0 && error < 0.0) || (raw > 1.0 && error > 0.0)) longitudinal.integral = before;
+            out.throttle = std::clamp(raw, 0.0, 1.0);
+        } else {
             out.throttle = c.throttle;
+        }
     } else {
         longitudinal.reset();
         out.throttle = kHold;

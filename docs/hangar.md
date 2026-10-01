@@ -319,6 +319,21 @@ stage end to end through the platform (`ctest -R hangar`).
   0.013 (the Su-25), the C-17A's 0.0068. Fixed gear's stays in the drag
   area. Without it, gear down or up an approach was the same to the bit
   ([flight-autonomy.md](flight-autonomy.md), B-13).
+- **The landing configuration's stall.** Where a design has flaps, the fly
+  stage flies a second stall at sea level: its flaps all out, its gear down,
+  trimmed by flying while they come down (left alone they upset it), from
+  1.3 times the clean stall, half its trim's power held (at idle its drag
+  bled the speed so fast the height hold sank past the break first), its
+  trim's elevator moved into the autopilot's integrator (summed with the
+  trim, clipped, the KC-135R had a quarter of its elevator left). Then it
+  flies a trim at 1.3 times that speed so configured and reads the attitude
+  it would come down a 3° glide slope at. The profile gives that stall
+  (`stall_flaps_cas_ms`) where it is slower than clean and that attitude
+  leaves 6° under the tail's touching - the room the platform's flare needs:
+  not the Su-25's (its elevator runs out with its flaps before its wing
+  stalls) nor the H-6K's (5.5° on the slope, 5.25 of room). A design may
+  record its published final approach speed instead (`[operations]
+  approach_kt`): the B-52H's 135 KIAS, its best flare speed at airbrakes 4.
 - **Induced drag.** By default each strip's lift is tilted by its own
   induced angle. That overstates the induced drag of the lattice's loading:
   by about 15 % on a plain wing of aspect ratio 6-10, and by a factor of 1.5
@@ -1148,7 +1163,7 @@ and the platform treats it as unknown:
 | `envelope` | the pitch attitude its tail touches the ground at on its wheels (`ground_pitch_max_deg`: Methods, Gear); the crosswind it lands and takes off in at most (`crosswind_max_ms`, from the design's `[operations] crosswind_kt`: [flight-autonomy.md](flight-autonomy.md), 4.54); its placards (`gear_cas_max_ms`, `flaps/cas_max_ms` and `flaps_threshold`, from `gear_kt`, `flaps_kt` and `flaps_above`: 4.57); the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). An aircraft whose law will not let a stall be flown has its least speed from the performance tables: their stall at the lowest altitude, at the weight it spawns at (the platform's energy management keeps a margin over it: [flight-autonomy.md](flight-autonomy.md), 4.16). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
 | `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
-| `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |
+| `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`); its stall in its landing configuration (`stall_flaps_cas_ms`: below); a published final approach speed where the design records one (`approach_cas_ms`, from `[operations] approach_kt`: the platform's recovery flies it, [flight-autonomy.md](flight-autonomy.md), 4.63) |
 | `applicability` | the design's `[applicability]` declarations (below) |
 | `tables` | the performance stage's tables (`out/performance.json`; below) |
 

@@ -183,8 +183,9 @@ struct HoverSection {
 struct PerformanceSection {
     static constexpr std::uint16_t kVersion = 1;
     SectionHeader header;
-    double stallCasMs = kUnknown, stallFlapsCasMs = kUnknown; ///< calibrated
+    double stallCasMs = kUnknown, stallFlapsCasMs = kUnknown; ///< calibrated; flaps: all out, its gear down
     double maxTasMs = kUnknown, ceilingM = kUnknown, climbMs = kUnknown;
+    double approachCasMs = kUnknown; ///< a published final approach speed, calibrated (docs/flight-autonomy.md, 4.63)
 };
 
 // --- control ----------------------------------------------------------------------------------

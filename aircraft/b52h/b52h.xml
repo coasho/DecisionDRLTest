@@ -648,9 +648,11 @@
       <property value="0.177075">fsim/plant/yaw/gain</property>
       <property value="1">fsim/performance/version</property>
       <property value="1">fsim/performance/provenance</property>
+      <property value="69.45">fsim/performance/approach_cas_ms</property>
       <property value="16118">fsim/performance/ceiling_m</property>
       <property value="307.438">fsim/performance/max_tas_ms</property>
       <property value="58.6062">fsim/performance/stall_cas_ms</property>
+      <property value="48.6423">fsim/performance/stall_flaps_cas_ms</property>
       <property value="1">fsim/applicability/version</property>
       <property value="1">fsim/applicability/provenance</property>
       <property value="0.0">fsim/applicability/aerobatic</property>

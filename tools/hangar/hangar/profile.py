@@ -94,6 +94,10 @@ def table_fields(tables):
     return out
 
 
+#: the room an approach leaves under its tail's touching for its flare (the recovery's: docs/flight-autonomy.md, 4.53)
+APPROACH_ROOM_DEG = 6.0
+
+
 def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down=None, turn_radius=None, yaw_accel=None):
     """{section: {field: value}} for the JSBSim file.
 
@@ -225,6 +229,19 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
     perf = {}
     if "stall_kcas" in stall:
         perf["stall_cas_ms"] = float(stall["stall_kcas"]) * KT
+    # its flaps all out, its gear down - where that is slower than clean (the Su-25's elevator runs out with them first) and
+    # it would come down the glide slope at 1.3 times it with APPROACH_ROOM_DEG under its tail's touching (the B-52H, flat
+    # on its bicycle gear, would not: its stall so configured at 21 deg; approached at it, it went around)
+    found = flown.get("stall_landing") or {}
+    landing, attitude = float(found.get("stall_kcas", float("nan"))), float(found.get("approach_pitch_deg", float("nan")))
+    room = tail_down is None or not (attitude > tail_down - APPROACH_ROOM_DEG)
+    if math.isfinite(landing) and landing < float(stall.get("stall_kcas", float("inf"))) and room:
+        perf["stall_flaps_cas_ms"] = landing * KT
+    # its published final approach speed, where the design records one ([operations] approach_kt): the platform's
+    # recovery flies it (4.63)
+    approach = (aircraft.spec.get("operations") or {}).get("approach_kt")
+    if approach is not None and 0.0 < float(approach) < 1000.0:
+        perf["approach_cas_ms"] = round(float(approach) * KT, 2)
     fighter = flown.get("fighter") or {}
     if "max_speed_ms" in flown:
         perf["max_tas_ms"] = float(flown["max_speed_ms"])

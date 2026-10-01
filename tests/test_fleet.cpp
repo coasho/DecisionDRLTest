@@ -762,7 +762,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             REQUIRE(c.accepted());
             launched[p.id] = c.activity, cross[p.id] = 0.0;
             const VehicleProfile& pr = *w.profile(p.id);
-            const double stall = std::isfinite(pr.performance.stallFlapsCasMs) ? pr.performance.stallFlapsCasMs : pr.performance.stallCasMs;
+            const double stall = pr.performance.stallCasMs; // (clean: the landing configuration's is the approach's, 4.63)
             vr[p.id] = 1.1 * (std::isfinite(stall) ? stall : p.minCasMs);
         }
         for (double t = 0.0; t < 180.0 && ended.size() < launched.size(); t += 1.0)
