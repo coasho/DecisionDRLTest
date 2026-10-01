@@ -333,7 +333,10 @@ void CapabilityCatalog::addBehaviors() {
         // setpoint is fixed-size: it takes UPDATE (docs/vehicle-interface.md, 4.2)
         const bool mode = traits.setpoint != SetpointKind::Behavior;
         // (a mode takes UPDATE - but a route intercept, which a new one replaces: docs/flight-autonomy.md, 4.47)
-        d.interactions = mode && traits.setpoint != SetpointKind::Intercept ? kCommand | kUpdate | kCancel | kStatus : kCommand | kCancel | kStatus;
+        // (and a behaviour with a parameter an UPDATE changes: the recovery's configuration, 4.58)
+        const bool updatable = std::any_of(traits.parameters.begin(), traits.parameters.end(), [](const ParameterInfo& p) { return p.updatable; });
+        d.interactions = (mode && traits.setpoint != SetpointKind::Intercept) || updatable ? kCommand | kUpdate | kCancel | kStatus
+                                                                                          : kCommand | kCancel | kStatus;
         d.accepted = kAcceptsCapabilityCommand | kAcceptsActivityCommand;
         d.superseded = supersededBy(id);
         d.setpoint = traits.setpoint;

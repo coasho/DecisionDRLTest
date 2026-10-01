@@ -144,8 +144,8 @@ TEST_CASE("discovery: a physical exception is not supported, with its rule and t
     const SupportInfo& catapult = supportOf(w, viper, "fsim.guidance.launch/carrier_catapult");
     CHECK(catapult.support == Support::NotSupported);
     CHECK(std::string_view(catapult.evidence).find("carrier = none") == 0);
-    // "R6, R7 or R5": the Cessna's flaps keep the recovery's configuration commands applicable
-    CHECK(supportOf(w, cessna, "fsim.guidance.recovery/configuration").support == Support::NotImplemented);
+    // "R6, R7 or R5": the Cessna's flaps keep the recovery's configuration commands applicable (built by FA-10c3b)
+    CHECK(supportOf(w, cessna, "fsim.guidance.recovery/configuration").support == Support::Supported);
     CHECK(supportOf(w, cessna, "fsim.guidance.recovery/configuration").rules == (ruleBit(Rule::RetractableGear) | ruleBit(Rule::Flaps) |
                                                                                ruleBit(Rule::ArresterHook)));
 }
@@ -162,8 +162,9 @@ TEST_CASE("discovery: applicable but not built is not implemented, with the stag
     CHECK(supportOf(w, viper, "fsim.guidance.launch").support == Support::Supported); // (built by FA-9a)
     CHECK(supportOf(w, viper, "fsim.guidance.recovery").support == Support::Supported); // (built by FA-10a)
     CHECK(supportOf(w, viper, "fsim.guidance.recovery/go_around").support == Support::Supported); // (built by FA-10b)
-    CHECK(supportOf(w, viper, "fsim.guidance.recovery/configuration").support == Support::NotImplemented); // (FA-10c's)
-    CHECK(supportOf(w, viper, "fsim.guidance.recovery/configuration").stage == 10);
+    CHECK(supportOf(w, viper, "fsim.guidance.recovery/configuration").support == Support::Supported); // (built by FA-10c3b)
+    CHECK(supportOf(w, viper, "fsim.guidance.route/waypoint_type/landing").support == Support::NotImplemented); // (FA-10d's)
+    CHECK(supportOf(w, viper, "fsim.guidance.route/waypoint_type/landing").stage == 10);
     CHECK(w.submit(viper, behavior("launch")).reason == Reason::Airborne); // a ground mode, the Viper flying
     // an id no platform defines is unknown, as before; its status is Unavailable, not Disabled
     CHECK(w.submit(viper, behavior("warp_drive")).reason == Reason::UnknownCapability);

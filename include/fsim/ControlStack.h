@@ -108,6 +108,8 @@ public:
 
     /// The running behaviour, if a behaviour is engaged.
     const Behavior* behavior() const noexcept;
+    /// The behaviour flying `slot`, once started on its command; null before (between steps: an UPDATE amends it).
+    Behavior* runningBehavior(std::size_t slot) noexcept;
     bool behaviorFinished() const noexcept;
     /// What the last update asked for, level by level (A-GRA's commanded state).
     CommandedState commanded() const noexcept;

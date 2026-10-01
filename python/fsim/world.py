@@ -1547,13 +1547,19 @@ class Activity:
         """A new setpoint: the level's fields by name (fsim.COMMAND_FIELDS),
         the others as a new command's defaults, or all of them in order - a
         mode's fields given, the others kept (a route's options, its waypoints
-        kept and flown afresh). Returns True if a value was clamped; raises
+        kept and flown afresh); a behaviour's parameters by name, those it
+        declares updatable (the recovery's ``configuration``: 1 CleanUp, 2
+        DirtyUp, 0 its own - docs/flight-autonomy.md, 4.58), the behaviour
+        not started again. Returns True if a value was clamped; raises
         fsim.Rejected if the activity has ended (preempted, completed,
-        canceled) or takes no updates (a behaviour: a new target is a new
-        submit_behavior)."""
+        canceled) or takes no updates (most behaviours: a new target is a
+        new submit_behavior), or a behaviour refuses it."""
         h = self.world._h
         if self.level == Level.BEHAVIOR:  # the library answers: not_updatable, or why not
-            return bool(_checked(h.activity_update(self.id, (), int(self.source), self.controller), h)[4])
+            if values:
+                raise TypeError("a behaviour's update takes its parameters by name")
+            params = {k: float(v) for k, v in fields.items()}
+            return bool(_checked(h.activity_update_behavior(self.id, params or None, int(self.source), self.controller), h)[4])
         return bool(_checked(h.activity_update(self.id, _row(self.level, values, fields), int(self.source), self.controller), h)[4])
 
     def update_route(self, waypoints=None, loiters=None, states=None, paths=None, branches=None, terminators=None, **options):

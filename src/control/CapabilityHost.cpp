@@ -1898,6 +1898,10 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         ++slot.revision;
         return result;
     }
+    if (const auto* next = std::get_if<BehaviorCommand>(&setpoint)) { // its updatable parameters (4.58: BehaviorUpdate.cpp)
+        const Reason why = amendBehavior(s, record.capability, std::get<BehaviorCommand>(slot.command), *next, result);
+        return why == Reason::None ? result : about(rejected(why, activity), result);
+    }
     if (const auto* next = std::get_if<PatternCommand>(&setpoint)) return updatePattern(s, activity, *next, shape, state, result, log);
     if (const auto* next = std::get_if<MustFlyCommand>(&setpoint)) return updateMustFly(s, activity, *next, state, result, log);
     if (slots_[s].range == RangePolicy::None) {
@@ -2139,6 +2143,10 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     if (setpoint.index() != w.command.index() || d.setpoint == SetpointKind::Marshall) return rejected(Reason::WrongCommandType, activity);
     CommandResult result = accepted(activity);
     result.commandId = record.commandId;
+    if (const auto* next = std::get_if<BehaviorCommand>(&setpoint)) { // its updatable parameters, for its start (4.58)
+        const Reason why = amendBehavior(kNotFlying, record.capability, std::get<BehaviorCommand>(w.command), *next, result);
+        return why == Reason::None ? result : about(rejected(why, activity), result);
+    }
     // what it will fly: the fields given replace its command's (a mode's merged, a level's replaced, a route's and a
     // curve's options kept where left out), then checked as its NEW was, from where the aircraft is now
     Command next = w.command;

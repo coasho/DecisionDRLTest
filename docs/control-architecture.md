@@ -474,7 +474,7 @@ A capability the aircraft does not have is simply absent from its catalog.
 
 **What guidance flies through.** Guidance capabilities list the flight capabilities their output goes through (`uses`), for example `fsim.guidance.hold` uses `fsim.flight.velocity`. Their availability follows the least available of those.
 
-**Updates.** Guidance capabilities do not take UPDATE in version 1, because their parameters are heap data. A new target is a NEW, which preempts the old activity.
+**Updates.** Guidance capabilities do not take UPDATE in version 1, because their parameters are heap data. A new target is a NEW, which preempts the old activity. (A behaviour may declare a parameter updatable, and takes UPDATE of it alone, not started again: the recovery's configuration, [flight-autonomy.md](flight-autonomy.md) 4.58.)
 
 **Ranges.** Until a profile narrows them, the ranges are the loops' own bounds, so step 1 changes no command (section 13).
 

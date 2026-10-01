@@ -206,6 +206,11 @@ const Behavior* ControlStack::behavior() const noexcept {
     return s == kNoSlot || config_->slots[s].level != Level::Behavior ? nullptr : behaviors_[s].get();
 }
 
+Behavior* ControlStack::runningBehavior(std::size_t slot) noexcept {
+    if (slot >= kSlotCount || !behaviors_[slot] || config_->slots[slot].level != Level::Behavior) return nullptr;
+    return started_[slot] == config_->slots[slot].generation ? behaviors_[slot].get() : nullptr;
+}
+
 bool ControlStack::behaviorFinished() const noexcept {
     const Behavior* b = behavior();
     return b && b->finished();

@@ -947,6 +947,9 @@ struct ParameterInfo {
     /// longitudinal acceleration, a wing's pitch rate). A command that sets
     /// it - to anything but kHold or its default - is refused (InvalidParameter).
     bool supported = true;
+    /// A behaviour's parameter an UPDATE of its live activity may change, without starting it again: the
+    /// recovery's configuration (docs/flight-autonomy.md, 4.58). A behaviour with one takes UPDATE.
+    bool updatable = false;
 };
 
 struct CapabilityDescriptor {

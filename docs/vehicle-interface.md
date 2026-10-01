@@ -506,7 +506,7 @@ Each step ships as commits on main with its tests, benchmark numbers (section 15
   - `hold` on a hover-capable vehicle holds its ground velocity, not the airspeed along the nose;
   - `loiter`'s minimum radius is 1 m for a rotorcraft (100 m stays a wing's);
   - route points validated (finite, in range, a positive capture radius: `InvalidParameter` with the point);
-  - Python's `Activity.update` on a behaviour answers `not_updatable`.
+  - Python's `Activity.update` on a behaviour answers `not_updatable` (a parameter it declares updatable aside: [flight-autonomy.md](flight-autonomy.md), 4.58).
 - *Tests:*
   - multi-leg routes (c172x, uh1h, iris);
   - `hold` converging on heading, altitude and speed, in a crosswind;

@@ -1702,6 +1702,33 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_publish_plan(world, fa, &plan, &reason) == FSIM_OK && reason == 0);
             CHECK(fsim_vehicle_plan_command(world, fa, 82, FSIM_PLAN_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
             CHECK(fsim_vehicle_get_plan(world, fa, 82, &got) == FSIM_OK && got.path_count == 1 && got.paths[0].airfield == 0);
+            {
+                /* ABI 1.45 (4.58): a recovery to runway 2, then A-GRA's CleanUp and DirtyUp as UPDATEs of its configuration -
+                   the C172 at 50 m/s above its flaps' 85 kt: dirtying up refused, cleaning up taken */
+                const char* rnames[2] = {"airfield", "runway"};
+                const double rvalues[2] = {5.0, 2.0};
+                const char* cname[1] = {"configuration"};
+                double cvalue[1] = {2.0};
+                fsim_behavior_command rec, upd;
+                fsim_command_result cr;
+                memset(&rec, 0, sizeof rec);
+                rec.id = "recovery", rec.param_names = rnames, rec.param_values = rvalues, rec.param_count = 2;
+                CHECK(fsim_vehicle_submit_behavior(world, fa, &rec, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_world_step(world, 1) == FSIM_OK);
+                memset(&upd, 0, sizeof upd);
+                upd.param_names = cname, upd.param_values = cvalue, upd.param_count = 1;
+                CHECK(fsim_activity_update_behavior(world, cr.activity, &upd, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                      strcmp(fsim_reason_name(cr.reason), "unavailable") == 0);
+                cvalue[0] = 3.0;
+                CHECK(fsim_activity_update_behavior(world, cr.activity, &upd, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "out_of_range") == 0);
+                cvalue[0] = 1.0;
+                CHECK(fsim_activity_update_behavior_by(world, cr.activity, FSIM_SOURCE_POLICY, 0, &upd, &cr) == FSIM_OK &&
+                      cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_activity_update_behavior(world, cr.activity, &rec, &cr) == FSIM_OK && /* (its airfield: not updatable) */
+                      strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0);
+                CHECK(fsim_activity_update_behavior(world, cr.activity, NULL, &cr) == FSIM_INVALID_ARGUMENT);
+                CHECK(fsim_activity_cancel(world, cr.activity, &cr) == FSIM_OK);
+            }
         }
         {
             /* ABI 1.36 (4.39): route plans - prepared for upload, published, uploaded and read back with its metadata;

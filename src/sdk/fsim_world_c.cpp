@@ -505,7 +505,7 @@ std::string fieldCounts(int level) {
 
 fsim::control::BehaviorCommand toBehavior(const fsim_behavior_command* c) {
     fsim::control::BehaviorCommand b;
-    b.id = c->id;
+    b.id = c->id ? c->id : ""; // (an UPDATE's may be NULL: its activity's behaviour)
     b.target = c->target;
     for (const auto& [k, v] : params(c->param_names, c->param_values, c->param_count)) b.params[k] = v;
     if (c->points)
@@ -1518,6 +1518,23 @@ FSIM_API int fsim_activity_update_by(fsim_world* world, fsim_activity_id activit
                                                (shape.support >= 0 || shape.mode >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
     toC(world, fsim::control::activityVehicle(activity), r, result);
     return FSIM_OK;
+}
+
+FSIM_API int fsim_activity_update_behavior(fsim_world* world, fsim_activity_id activity, const fsim_behavior_command* command,
+                                           fsim_command_result* result) {
+    return fsim_activity_update_behavior_by(world, activity, FSIM_SOURCE_POLICY, 0, command, result);
+}
+
+FSIM_API int fsim_activity_update_behavior_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
+                                              const fsim_behavior_command* command, fsim_command_result* result) {
+    // (ABI 1.45: a behaviour's updatable parameters - the recovery's configuration, docs/flight-autonomy.md 4.58)
+    fsim::control::Source from;
+    if (!world || !command || !result || !toSource(source, from)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_activity_update_behavior", [&] {
+        const fsim::control::Command c = toBehavior(command);
+        toC(world, fsim::control::activityVehicle(activity), world->world.update(fsim::control::Caller{from, controller}, activity, c), result);
+        return FSIM_OK;
+    });
 }
 
 FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values, uint32_t stride) {

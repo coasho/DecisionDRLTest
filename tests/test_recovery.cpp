@@ -296,3 +296,82 @@ TEST_CASE("recovery: its NEW names the airfield or runway it cannot use; only in
     INFO(reasonName(onGround.reason));
     CHECK(onGround.reason == Reason::OnGround);
 }
+
+namespace {
+
+/// An UPDATE of a recovery's configuration (4.58): 1 CleanUp, 2 DirtyUp, 0 its own.
+BehaviorCommand configuration(double value) {
+    BehaviorCommand b;
+    b.params["configuration"] = value;
+    return b;
+}
+
+} // namespace
+
+TEST_CASE("recovery: CleanUp and DirtyUp - gear and flaps at once on its approach; cleaned up it goes around and lands on its next; "
+          "DirtyUp refused above its placards (RCV-08, 4.58)",
+          "[modes][recovery]") {
+    session::World w(options("recovery-configuration"));
+    const auto id = wing(w, "f16c", 300.0, 100.0, 1); // (its gear's placard 250 kt: 129 m/s; it flies at 98)
+    double lat0, lon0, elevation;
+    runwayAhead(w, id, 20000.0, lat0, lon0, elevation);
+    CHECK(w.support(id, "fsim.guidance.recovery/configuration")->support == Support::Supported);
+    const auto& caps = w.capabilities(id);
+    const auto d = std::find_if(caps.begin(), caps.end(), [](const CapabilityDescriptor& c) { return c.id == "fsim.guidance.recovery"; });
+    REQUIRE(d != caps.end());
+    CHECK((d->interactions & kUpdate) != 0); // (its configuration: the behaviour's updatable parameter)
+    const CommandResult r = w.submit(id, recovery());
+    REQUIRE(r.accepted());
+    w.step();
+    REQUIRE(w.activity(r.activity)->state == ActivityState::Active);
+
+    // its parameters alone, the updatable ones, in range
+    CHECK(w.update(r.activity, Command(configuration(3.0))).reason == Reason::OutOfRange);
+    BehaviorCommand other = recovery();
+    CHECK(w.update(r.activity, Command(other)).reason == Reason::InvalidParameter); // (its airfield: a new one is a new NEW)
+    other = configuration(2.0);
+    other.id = "hold";
+    CHECK(w.update(r.activity, Command(other)).reason == Reason::WrongCommandType);
+
+    // DirtyUp: its gear down and its landing flaps out at once, its approach flown on - not started again
+    const CommandResult dirty = w.update(r.activity, Command(configuration(2.0)));
+    CHECK(dirty.accepted());
+    w.step();
+    CHECK(w.inputs(id)->gearDown == 1.0);
+    CHECK(w.inputs(id)->flaps == 1.0);
+    CHECK(w.activity(r.activity)->state == ActivityState::Active);
+    Setpoint read;
+    REQUIRE(w.activitySetpoint(r.activity, read));
+    CHECK(std::get<BehaviorCommand>(std::get<Command>(read.command)).param("configuration", -1.0) == 2.0);
+
+    // CleanUp: both in at once; not configured to land, it goes around at the gate, and lands on its next approach
+    CHECK(w.update(r.activity, Command(configuration(1.0))).accepted());
+    w.step();
+    CHECK(w.inputs(id)->gearDown == 0.0);
+    CHECK(w.inputs(id)->flaps == 0.0);
+    const Approached a = approach(w, id, r.activity, lat0, lon0, elevation);
+    INFO("climbed away " << a.climbs << " times");
+    CHECK(a.climbs == 1);
+    CHECK(a.state == ActivityState::Completed);
+    CHECK(a.touched);
+
+    // above its placards: refused (the C-130J at 98 m/s, its gear's 168 kt: 86 m/s)
+    session::World h(options("recovery-configuration-fast"));
+    const auto herc = wing(h, "c130j", 300.0, 100.0, 1);
+    runwayAhead(h, herc, 20000.0, lat0, lon0, elevation);
+    const CommandResult hr = h.submit(herc, recovery());
+    REQUIRE(hr.accepted());
+    h.step();
+    CHECK(h.update(hr.activity, Command(configuration(2.0))).reason == Reason::Unavailable);
+    CHECK(h.update(hr.activity, Command(configuration(1.0))).accepted()); // (cleaning up is never above them)
+
+    // a rotorcraft has neither
+    session::World v(options("recovery-configuration-rotor"));
+    const auto heli = rotor(v, "uh1h");
+    runwayAhead(v, heli, 300.0, lat0, lon0, elevation);
+    CHECK(v.support(heli, "fsim.guidance.recovery/configuration")->support == Support::NotSupported);
+    const CommandResult vr = v.submit(heli, recovery());
+    REQUIRE(vr.accepted());
+    v.step();
+    CHECK(v.update(vr.activity, Command(configuration(2.0))).reason == Reason::NotSupported);
+}

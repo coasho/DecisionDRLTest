@@ -470,6 +470,16 @@ FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activit
 FSIM_API int fsim_activity_update_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
                                      uint32_t count, fsim_command_result* result);
 FSIM_API int fsim_activity_cancel_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, fsim_command_result* result);
+/* UPDATE of a behaviour's live activity (ABI 1.45; docs/flight-autonomy.md, 4.58): its parameters alone, each one its
+ * behaviour declares updatable - the recovery's "configuration", A-GRA's CleanUp and DirtyUp: 1 gear and flaps in, 2 out
+ * at once, 0 its own - flown from its next update, the behaviour not started again. `command->id` NULL, empty or the
+ * behaviour's; no target, no points. Refused "not_updatable" by a behaviour that takes none, "invalid_parameter" for
+ * another parameter, "out_of_range" (reserved names the parameter's index), or the behaviour's own refusal - the
+ * recovery's "unavailable" off its approach or, dirtying up, above its placards, "not_supported" on a rotorcraft. */
+FSIM_API int fsim_activity_update_behavior(fsim_world* world, fsim_activity_id activity, const fsim_behavior_command* command,
+                                           fsim_command_result* result);
+FSIM_API int fsim_activity_update_behavior_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
+                                              const fsim_behavior_command* command, fsim_command_result* result);
 /* An activity command (ABI 1.10) for a live activity - flying, waiting or disabled - declaring `source` and `controller`
  * as the *_by calls do: disable (it stops flying and is kept), enable, reset (over from its beginning), delete (a sticky
  * disable: it ends), change its rank (to rank_priority, rank_precedence), unassign (it gives up its axes and waits for

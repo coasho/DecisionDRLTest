@@ -567,6 +567,7 @@ public:
     bool configures() const noexcept override { return true; }
     void configure(ActuatorCommand& out) const noexcept override;
     double speedbrake() const noexcept override;
+    Reason amend(const BehaviorCommand& update) noexcept override;
     Phase phase() const noexcept { return phase_; }
     GoAround lastGoAround() const noexcept { return cause_; }
     std::uint32_t goArounds() const noexcept { return goArounds_; }
@@ -591,6 +592,7 @@ private:
     double gearMaxMs_ = kHold, flapsMaxMs_ = kHold, flapsAbove_ = 0.0; ///< its placards (4.57): NaN, none
     double casMs_ = 0.0;      ///< its calibrated airspeed as last updated
     bool gearOut_ = false;    ///< its gear lowered (below its placard)
+    std::uint8_t configuration_ = 0; ///< commanded (4.58): 0 its own, 1 cleaned up, 2 dirtied up
     double placard(double flaps) const noexcept; ///< its flaps within their placard
     double casRateMs2_ = 0.0, lastCasMs_ = 0.0, slopeS_ = 0.0; ///< its calibrated airspeed's rate, smoothed; its time down the slope
     // its go-arounds (4.54)

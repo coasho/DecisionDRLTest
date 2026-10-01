@@ -237,6 +237,38 @@ class LaunchTest(unittest.TestCase):
         self.assertLess(sink, 3.2)               # (1.05 m/s)
         self.assertLess(math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1]), 0.5)
 
+    def test_cleanup_and_dirtyup(self):
+        # A-GRA's CleanUp and DirtyUp (4.58): an update of the recovery's configuration - the C172 at 44 m/s, above its flaps' 85 kt
+        # (43.7 m/s): dirtying up refused; cleaning up and handing back taken, the recovery not started again
+        w = world("py-configuration")
+        v = w.create_vehicle("c172", "jsbsim:c172", latitude_deg=40.0, longitude_deg=0.0, altitude_msl_m=300.0, heading_deg=0.0, airspeed_ms=45.0)
+        w.step(10)
+        s = v.state
+        lat0, lon0, ground = s.latitude_rad + 8000.0 / R, s.longitude_rad, s.altitude_msl_m - s.altitude_agl_m
+        start = fsim.RunwayPoint(lat0, lon0, ground)
+        limit = fsim.RunwayPoint(lat0 + 3000.0 / R, lon0, ground)
+        v.load_airfield(fsim.Airfield(7, "", fsim.HOLD, (fsim.Runway(3, 0.0, 3000.0, fsim.RunwayCoordinates(), fsim.RunwayCoordinates(start, start, limit)),)))
+        self.assertEqual(v.support("fsim.guidance.recovery/configuration").support, fsim.Support.SUPPORTED)
+        a = v.submit_behavior("recovery", airfield=7, runway=3)
+        w.step(1)
+        self.assertGreater(v.state.airspeed_calibrated_ms, 43.7)
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update(configuration=2)
+        self.assertEqual(refused.exception.reason, "unavailable")
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update(runway=3)
+        self.assertEqual(refused.exception.reason, "invalid_parameter")
+        self.assertFalse(a.update(configuration=1))
+        w.step(1)
+        self.assertEqual(v.get_property("fcs/flap-cmd-norm"), 0.0)
+        self.assertEqual(a.setpoint().kwargs["configuration"], 1.0)
+        self.assertFalse(a.update(configuration=0))
+        self.assertEqual(a.info.state, fsim.ActivityState.ACTIVE)
+        held = v.submit_behavior("hold")
+        with self.assertRaises(fsim.Rejected) as refused:
+            held.update(radius_m=500.0)
+        self.assertEqual(refused.exception.reason, "not_updatable")
+
     def test_refusals(self):
         w = world("py-launch-refused")
         v, _, _ = parked(w, "c172")

@@ -196,7 +196,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.recovery/carrier", "fsim.guidance.recovery", N, 11, R3 | R4, ""},         // RCV-05
     {"fsim.guidance.recovery/carrier_delta", "fsim.guidance.recovery", N, 11, R3 | R4, ""},   // RCV-06
     {"fsim.guidance.recovery/carrier_calls", "fsim.guidance.recovery", N, 11, R3 | R4, ""},   // RCV-07
-    {"fsim.guidance.recovery/configuration", "fsim.guidance.recovery", N, 10, R6 | R7 | R5, ""}, // RCV-08
+    {"fsim.guidance.recovery/configuration", "fsim.guidance.recovery", S, 10, R6 | R7 | R5, "", false, nullptr, true}, // RCV-08 (4.58)
     {"fsim.guidance.recovery/arrester_hook", "fsim.guidance.recovery", N, 11, R5, ""},        // RCV-09
     {"fsim.guidance.recovery/carrier_overrides", "fsim.guidance.recovery", N, 11, R3 | R4, ""}, // RCV-10
 

@@ -784,9 +784,12 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
             continue;
         }
         CHECK((d.interactions & (kCancel | kStatus)) == (kCancel | kStatus));
-        // a behaviour's parameters are heap data; a mode's setpoint is fixed-size and takes UPDATE (docs/vehicle-interface.md, 4.2)
+        // a behaviour's parameters are heap data; a mode's setpoint is fixed-size and takes UPDATE (docs/vehicle-interface.md, 4.2) - and
+        // a behaviour with a parameter an UPDATE changes (the recovery's configuration: docs/flight-autonomy.md, 4.58)
+        const bool amends = std::any_of(d.parameters.begin(), d.parameters.end(), [](const ParameterInfo& p) { return p.updatable; });
         CHECK(((d.interactions & kUpdate) != 0) ==
-              ((d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior) && d.setpoint != SetpointKind::Intercept)); // (a route intercept, which a new one replaces: ADR-29 FA-8d)
+              (((d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior) && d.setpoint != SetpointKind::Intercept) ||
+               amends)); // (a route intercept, which a new one replaces: ADR-29 FA-8d)
         const bool primary = (d.axes & kPrimaryAxes) != 0; // flown through the cascade, or the engines' thrust beside it
         CHECK(primary == (!Maker::isSupport(d) || d.id == "fsim.flight.engines"));
         if (d.ground) { // a ground mode, the vehicle flying: unavailable, and refused so (their lifecycles: test_launch.cpp, test_taxi.cpp)

@@ -658,6 +658,12 @@ private:
                                 const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr,
                                 const CurveShape* curveShape = nullptr, const RouteExtras* extras = nullptr) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
+    /// An UPDATE of a behaviour's command `kept` - its updatable parameters alone, in range - taken by the behaviour flying
+    /// `slot` (kNotFlying: one waiting, which reads them as it starts) and merged in: None, or why not (4.58; BehaviorUpdate.cpp,
+    /// out of the host's command paths).
+    static constexpr std::size_t kNotFlying = static_cast<std::size_t>(-1);
+    Reason amendBehavior(std::size_t slot, std::size_t capability, BehaviorCommand& kept, const BehaviorCommand& next,
+                         CommandResult& result) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
     void keepWindows(double now) noexcept;

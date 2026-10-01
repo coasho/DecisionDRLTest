@@ -1476,6 +1476,12 @@ public:
     virtual void configure(ActuatorCommand& out) const noexcept { (void)out; }
     /// The speedbrake it sets, 0..1, as of its last update, where its activity owns that axis (4.55); kHold leaves it as it is.
     virtual double speedbrake() const noexcept { return kHold; }
+    /// An UPDATE of its live activity, its updatable parameters (ParameterInfo::updatable) checked: None to take it,
+    /// else why not - flown from its next update, the behaviour not started again (docs/flight-autonomy.md, 4.58).
+    virtual Reason amend(const BehaviorCommand& update) noexcept {
+        (void)update;
+        return Reason::NotUpdatable;
+    }
 };
 
 /// What the cascade asked for in its last control update, level by level

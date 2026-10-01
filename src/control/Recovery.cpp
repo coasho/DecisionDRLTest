@@ -31,6 +31,8 @@ constexpr double kManoeuvreShare = 1.6 / 1.3; // of its approach speed: to the i
 constexpr double kCaptureRad = 3.0 * kDeg;    // a heading this far off flown as a turn at kTurnBankRad
 constexpr double kTurnBankRad = 35.0 * kDeg;  // its turns' bank no more than this
 constexpr double kApproachBankRad = 25.0 * kDeg; // its approach's turns planned at this bank (its points' bank)
+// its configuration commanded (4.58; A-GRA's CleanUp and DirtyUp): 0 its own
+constexpr std::uint8_t kCleanUp = 1, kDirtyUp = 2;
 constexpr double kFlapsPerS = 0.05;           // its flaps put out so fast, level before the glide slope, for the attitude it will
                                               // come down it at - and held down it: changed on it, they hunted (the E-7A porpoised)
 constexpr double kSettledShare = 0.05;        // ...once within this share of its approach speed
@@ -252,6 +254,7 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
     }
     b.params["_thr_lat"] = lat0, b.params["_thr_lon"] = lon0, b.params["_course"] = course, b.params["_length"] = line.lengthM;
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
+    b.params.try_emplace("configuration", 0.0); // (its key in place: an UPDATE of it allocates nothing, 4.58)
     if (profile_ && std::isfinite(profile_->envelope.groundPitchMaxRad)) b.params["_tail"] = profile_->envelope.groundPitchMaxRad;
     laidRoute_ = true; // (written to the path store as a route's, with its activity)
     return Reason::None;
@@ -280,6 +283,7 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     missedFrom_ = static_cast<std::uint32_t>(b.param("_missed", 0.0));
     airbrakes_ = b.param("_sb_air", 0.0) != 0.0;
     gearMaxMs_ = b.param("_gear_max", kHold), flapsMaxMs_ = b.param("_flaps_max", kHold), flapsAbove_ = b.param("_flaps_above", 0.0);
+    configuration_ = static_cast<std::uint8_t>(std::lround(std::clamp(b.param("configuration", 0.0), 0.0, 2.0)));
     casMs_ = ctx.sensed.airspeedCalibratedMs, gearOut_ = false;
     zoneEndM_ = std::min(std::max(aimM_ + kZoneM, lengthM_ / 3.0), lengthM_ / 2.0);
     wind_.reset();
@@ -291,7 +295,7 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
 void RecoveryBehavior::goAroundFrom(GoAround cause) noexcept {
     // full power, climbing straight ahead at the speed it turned onto its approach at, its flaps back to a takeoff's; its gear
     // up once it climbs (ICAO Doc 8168's missed approach: the climb straight on, then the turn)
-    phase_ = Phase::GoAround, cause_ = cause, ++goArounds_;
+    phase_ = Phase::GoAround, cause_ = cause, ++goArounds_, configuration_ = 0;
     lastApproach_ = goArounds_ >= kApproaches;
     flaps_ = kLeastFlaps, speedbrake_ = 0.0, speedAddMs_ = 0.0, unstableS_ = crosswindS_ = 0.0;
 }
@@ -341,6 +345,9 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
     // its placards (4.57): its gear lowered only below its speed (configure), and kept down
     casMs_ = s.airspeedCalibratedMs;
     if (configured_ && !gearOut_ && !(casMs_ > gearMaxMs_)) gearOut_ = true;
+    // dirtied up (4.58): its gear and its landing flaps out at once, on its approach, below their placards
+    if (configuration_ == kDirtyUp && phase_ == Phase::Approach && !(casMs_ > gearMaxMs_) && !(casMs_ > flapsMaxMs_))
+        configured_ = gearOut_ = true, flaps_ = kLandingFlaps;
     double alongM, crossM;
     onLine(thrLat_, thrLon_, courseRad_, s.latitudeRad, s.longitudeRad, alongM, crossM);
     if (phase_ == Phase::Rollout) {
@@ -384,7 +391,8 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
         const double speed = s.airspeedCalibratedMs - (vappMs_ + speedAddMs_);
         const bool unstable = h < kGateAglM && (std::abs(crossM) > std::max(kLateralLeastM, kLateralShare * toAim) ||
                                                 std::abs(h - toAim * std::tan(kGlideRad)) > std::max(kVerticalLeastM, toAim * std::tan(kVerticalRad)) ||
-                                                speed < -kSlowMs || speed > kFastMs || sink > std::max(kSinkLeastMs, slopeSink + kSinkMarginMs));
+                                                speed < -kSlowMs || speed > kFastMs || sink > std::max(kSinkLeastMs, slopeSink + kSinkMarginMs) ||
+                                                configuration_ == kCleanUp); // (cleaned up: not configured to land, 4.58)
         unstableS_ = unstable ? unstableS_ + dt : 0.0;
         if (crosswindS_ >= kUnstableS || unstableS_ >= kUnstableS) {
             goAroundFrom(crosswindS_ >= kUnstableS ? GoAround::Crosswind : GoAround::Unstable);
@@ -499,11 +507,29 @@ void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
         out.flaps = 0.0, out.gearDown = 0.0;
         return;
     }
+    if (configuration_ == kCleanUp && (phase_ == Phase::Approach || phase_ == Phase::Flare)) { // (4.58: gear and flaps in)
+        out.gearDown = 0.0;
+        if (!hovers_) out.flaps = 0.0;
+        return;
+    }
     if (!configured_) return;
     out.gearDown = gearOut_ || !(casMs_ > gearMaxMs_) || phase_ == Phase::Rollout ? 1.0 : 0.0;
     // its flaps up on the runway, its lift dumped onto its wheels: with them out, at its touchdown speed, the C-130J and the
     // B-52H flew off again 35 m
     if (!hovers_) out.flaps = phase_ == Phase::Rollout ? 0.0 : placard(flaps_);
+}
+
+Reason RecoveryBehavior::amend(const BehaviorCommand& update) noexcept {
+    // A-GRA's CleanUp and DirtyUp (RCV-08): "an ACP on approach" to retract or deploy its gear and flaps at once - its
+    // approach then flown on (cleaned up, it goes around at the gate); 0 hands them back to it
+    const double c = update.param("configuration", kHold);
+    if (isHold(c)) return Reason::None;
+    const auto next = static_cast<std::uint8_t>(std::lround(c));
+    if (hovers_) return next == 0 ? Reason::None : Reason::NotSupported; // (a rotorcraft's has neither: rule R6, R7)
+    if (next != 0 && phase_ != Phase::Approach) return Reason::Unavailable;      // on its approach alone
+    if (next == kDirtyUp && (casMs_ > gearMaxMs_ || casMs_ > flapsMaxMs_)) return Reason::Unavailable; // above its placards (B-7)
+    configuration_ = next;
+    return Reason::None;
 }
 
 double RecoveryBehavior::placard(double flaps) const noexcept {
@@ -523,7 +549,9 @@ void registerRecovery(ControllerRegistry& r) {
     auto p = [](const char* name, const char* unit, double def, double lo, double hi) { return ParameterInfo{name, unit, lo, hi, def, true}; };
     BehaviorTraits recovery;
     recovery.persistence = Persistence::Terminating;
-    recovery.parameters = {p("airfield", "", now, 1.0, 4294967295.0), p("runway", "", now, 1.0, 4294967295.0)};
+    ParameterInfo configuration = p("configuration", "", 0.0, 0.0, 2.0); // (4.58: 1 CleanUp, 2 DirtyUp; an UPDATE changes it)
+    configuration.updatable = true;
+    recovery.parameters = {p("airfield", "", now, 1.0, 4294967295.0), p("runway", "", now, 1.0, 4294967295.0), configuration};
     recovery.uses = {"fsim.flight.actuator", "fsim.flight.velocity", "fsim.flight.position"};
     recovery.mode = FlightMode::Recovery;
     recovery.axes = axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes) | axisBit(Axis::Speedbrake);

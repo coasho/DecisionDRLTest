@@ -1666,6 +1666,32 @@ static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ss
     return result_tuple(self->world, &r);
 }
 
+/* activity_update_behavior(activity, params, source=0, controller=0) -> result: a behaviour's updatable parameters (ABI 1.45) */
+static PyObject* world_activity_update_behavior(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    fsim_command_result r;
+    int source = 0;
+    uint32_t controller = 0;
+    if (!check_args(n, 2, 4, "activity_update_behavior") || !as_u64(args[0], &activity) || (n > 2 && !as_int(args[2], &source)) ||
+        (n > 3 && !as_u32(args[3], &controller)) || !WORLD_IDLE(self))
+        return NULL;
+    fsim_py_params p;
+    if (fsim_py_params_read(args[1] == Py_None ? NULL : args[1], &p) < 0) {
+        fsim_py_params_free(&p);
+        return NULL;
+    }
+    fsim_behavior_command c;
+    memset(&c, 0, sizeof c);
+    c.param_names = p.names;
+    c.param_values = p.values;
+    c.param_count = p.count;
+    const int rc = fsim_activity_update_behavior_by(self->world, activity, source, controller, &c, &r);
+    fsim_py_params_free(&p);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* activity_update_batch(activities uint64[n], values float64[n][stride], stride[, fields]): with `fields`, each
  * row holds that many (a level's fsim_command_field_count or fsim_command_field_count_full) */
 static PyObject* world_activity_update_batch(PyObject* o, PyObject* const* args, Py_ssize_t n) {
@@ -4175,6 +4201,7 @@ static PyMethodDef world_methods[] = {
     FAST("submit_nurbs", world_submit_nurbs, "submit_nurbs(id, values, segments, source, axes, range, min_version) -> result"),
     FAST("activity_update_nurbs", world_activity_update_nurbs, "activity_update_nurbs(activity, values, segments, source=0) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values, source=0) -> result"),
+    FAST("activity_update_behavior", world_activity_update_behavior, "activity_update_behavior(activity, params, source=0, controller=0) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity, source=0) -> result"),
     FAST("activity_command", world_activity_command, "activity_command(activity, command, priority, precedence, source=0) -> result"),
