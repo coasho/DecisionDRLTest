@@ -45,7 +45,7 @@ Protection protectionFor(const VehicleProfile& profile, std::uint32_t features =
 
 /// The limits in force: the flaps configuration's with the flaps commanded
 /// beyond the threshold, the gear's speed with the gear down (then written into `scratch`).
-const EnvelopeLimits& activeLimits(const Protection& p, double flapsCommand, double gearPosition, EnvelopeLimits& scratch) noexcept;
+const EnvelopeLimits& activeLimits(const Protection& p, double flapsCommand, double gearCommand, EnvelopeLimits& scratch) noexcept;
 
 /// A setpoint at its level (above the actuators) limited as the state is
 /// now (11.3): each field to its limit, the pitch attitude and the load

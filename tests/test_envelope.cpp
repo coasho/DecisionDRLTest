@@ -119,7 +119,10 @@ TEST_CASE("envelope: a validation is answered as a NEW would be, and nothing fli
     CHECK(r.status == CommandStatus::Rejected);
     CHECK(r.reason == Reason::PerformanceLimit);
     // a support effector's, and an authority's refusal, the same
-    CHECK(w.submit(f16, GearCommand{1.0}, v).status == CommandStatus::Valid);
+    CHECK(w.submit(f16, FlapsCommand{0.5}, v).status == CommandStatus::Valid);
+    r = w.submit(f16, GearCommand{1.0}, v); // (above its gear's placard, 250 KCAS: 4.57)
+    CHECK(r.status == CommandStatus::Rejected);
+    CHECK(r.reason == w.submit(f16, GearCommand{1.0}).reason);
     CommandOptions override;
     override.source = Source::Override;
     REQUIRE(w.submit(f16, VelocityCommand{160.0, 0.0, 0.5}, override).accepted());

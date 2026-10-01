@@ -176,6 +176,16 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
     crosswind = spec.get("operations", {}).get("crosswind_kt")
     if crosswind is not None and 0.0 < float(crosswind) < 200.0:
         envelope["crosswind_max_ms"] = round(float(crosswind) * KT, 2)
+    # its placards, published, else none (docs/flight-autonomy.md, 4.57): the most it moves its gear at, and the most with
+    # its flaps out beyond flaps_above - the platform refuses gear and flaps above them, and its protection holds them
+    operations = spec.get("operations", {})
+    gear = operations.get("gear_kt")
+    if gear is not None and 0.0 < float(gear) < 1000.0:
+        envelope["gear_cas_max_ms"] = round(float(gear) * KT, 2)
+    flaps = operations.get("flaps_kt")
+    if flaps is not None and 0.0 < float(flaps) < 1000.0:
+        envelope["flaps/cas_max_ms"] = round(float(flaps) * KT, 2)
+        envelope["flaps_threshold"] = float(operations.get("flaps_above", 0.05))
     if envelope:
         out["envelope"] = envelope
 

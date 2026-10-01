@@ -404,6 +404,14 @@ channels = { rudder = 30, flap = 20 }
 # the type: its flying qualities' requirement stands in for it.
 [operations]
 crosswind_kt = 30
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: F/A-18 NATOPS flight manual, landing configuration limitations
+# (navyflightmanuals.tpub.com): the gear and the flaps HALF and FULL 250 KCAS - the
+# EA-18G's F/A-18F airframe, taken as the same.
+gear_kt = 250
+flaps_kt = 250
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

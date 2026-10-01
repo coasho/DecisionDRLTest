@@ -107,12 +107,12 @@ TEST_CASE("reports: an activity's setpoint read back - completed, merged, append
         CHECK(commandOf<CurveCommand>(read)->latitudeRad == reference); // (the same reference)
     }
     SECTION("a support command, and a level's") {
-        const CommandResult g = w.submit(f16, SupportCommand(GearCommand{0.0}));
+        const CommandResult g = w.submit(f16, SupportCommand(FlapsCommand{0.0})); // (its gear: above its placard, 4.57)
         REQUIRE(g.accepted());
         REQUIRE(w.activitySetpoint(g.activity, read));
-        const auto* gear = std::get_if<SupportCommand>(&read.command);
-        REQUIRE(gear);
-        CHECK(std::get<GearCommand>(*gear).down == 0.0);
+        const auto* flaps = std::get_if<SupportCommand>(&read.command);
+        REQUIRE(flaps);
+        CHECK(std::get<FlapsCommand>(*flaps).position == 0.0);
         const CommandResult v = w.submit(f16, Command(VelocityCommand{170.0, 2.0, 1.4}));
         REQUIRE(v.accepted());
         REQUIRE(w.activitySetpoint(v.activity, read));

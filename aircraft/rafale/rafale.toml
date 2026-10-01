@@ -325,6 +325,11 @@ channels = { elevator = 20 }
 # the type: its flying qualities' requirement stands in for it.
 [operations]
 crosswind_kt = 30
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: none found. It has no flaps.
+placards_unknown = "its gear's limit: its flight manual is not public and no other public source gives them"
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

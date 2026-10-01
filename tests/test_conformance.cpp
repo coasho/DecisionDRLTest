@@ -806,6 +806,15 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
             CHECK(r.index == 0);
             continue;
         }
+        if (d.id == "fsim.support.gear" && w.capabilityStatus(v, d.id).availability != Availability::Available) {
+            // above its operating speed (its placard, docs/flight-autonomy.md 4.57): not operated, refused as its status says
+            // (the C-130J at its reference speed; its lifecycle: test_support.cpp)
+            const CapabilityStatus st = w.capabilityStatus(v, d.id);
+            CHECK((st.availability == Availability::TemporarilyUnavailable && st.reason == Reason::Unavailable));
+            CHECK(w.submit(v, GearCommand{1.0}).reason == st.reason);
+            CHECK(w.submit(v, GearCommand{0.0}).reason == st.reason);
+            continue;
+        }
         CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);
 
         // NEW: pending, owning the capability's axes
@@ -815,10 +824,6 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
         CommandResult r;
         if (support) {
             r = w.submit(v, sc);
-            if (r.reason == Reason::Unavailable && std::holds_alternative<GearCommand>(sc)) { // down above its placard speed: up, then
-                sc = GearCommand{0.0};
-                r = w.submit(v, sc);
-            }
         } else {
             REQUIRE(make.cascade(d, false, c));
             r = submitMade(w, v, c, make);
@@ -924,6 +929,16 @@ struct AuthorityModel {
         return Reason::None;
     }
 };
+
+/// The status the rules give capability `c` now: the model's, and the gear's placard last of the reasons
+/// (docs/flight-autonomy.md, 4.57) - above its operating speed it is not operated.
+CapabilityStatus expectedStatus(session::World& w, std::uint32_t v, const AuthorityModel& authority, std::size_t c) {
+    const CapabilityStatus& s = authority.status(c);
+    if (s.availability == Availability::Available && w.capabilities(v)[c].id == "fsim.support.gear" &&
+        w.vehicleState(v)->airspeedCalibratedMs > w.profile(v)->envelope.gearCasMaxMs)
+        return CapabilityStatus{Availability::TemporarilyUnavailable, Reason::Unavailable};
+    return s;
+}
 
 template <class T>
 bool among(T r, std::initializer_list<T> allowed) { return std::find(allowed.begin(), allowed.end(), r) != allowed.end(); }
@@ -1658,7 +1673,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             } else if (a < 0.55) {
                 done.authority = "request";
                 const CapabilityStatus own = w.vehicleState(v)->diverged ? CapabilityStatus{Availability::TemporarilyUnavailable, Reason::Diverged}
-                                                                          : authority.status(c);
+                                                                          : expectedStatus(w, v, authority, c);
                 const ControllerId by = controller();
                 const Reason expected = !authority.control[c].allowed                                      ? Reason::NotAllowed
                                         : own.availability != Availability::Available                      ? own.reason
@@ -1781,7 +1796,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             CHECK((st.allowed == authority.control[i].allowed && st.granted == authority.control[i].granted && st.holder == authority.control[i].holder));
             if (!diverged) {
                 const CapabilityStatus a = w.capabilityStatus(v, caps[i].id);
-                CHECK((a.availability == authority.status(i).availability && a.reason == authority.status(i).reason));
+                const CapabilityStatus expected = expectedStatus(w, v, authority, i);
+                CHECK((a.availability == expected.availability && a.reason == expected.reason));
             }
         }
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||

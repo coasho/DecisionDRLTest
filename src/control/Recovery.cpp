@@ -245,6 +245,9 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
         b.params["_vapp"] = vapp, b.params["_aim"] = aim, b.params["_missed"] = count > 4 ? 4.0 : 0.0;
         b.params["_circuit"] = std::max(points[1].altitudeM, elevation + kCircuitLeastAglM);
         if (profile_ && std::isfinite(profile_->envelope.crosswindMaxMs)) b.params["_xwind"] = profile_->envelope.crosswindMaxMs;
+        if (profile_ && std::isfinite(profile_->envelope.gearCasMaxMs)) b.params["_gear_max"] = profile_->envelope.gearCasMaxMs;
+        if (profile_ && std::isfinite(profile_->envelope.flaps.casMaxMs))
+            b.params["_flaps_max"] = profile_->envelope.flaps.casMaxMs, b.params["_flaps_above"] = profile_->envelope.flapsThreshold;
         if (profile_ && profile_->effectors.speedbrakeApproach) b.params["_sb_air"] = 1.0; // (4.55)
     }
     b.params["_thr_lat"] = lat0, b.params["_thr_lon"] = lon0, b.params["_course"] = course, b.params["_length"] = line.lengthM;
@@ -276,6 +279,8 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     crosswindMaxMs_ = b.param("_xwind", kHold), circuitMslM_ = b.param("_circuit", elevationM_ + kCircuitLeastAglM);
     missedFrom_ = static_cast<std::uint32_t>(b.param("_missed", 0.0));
     airbrakes_ = b.param("_sb_air", 0.0) != 0.0;
+    gearMaxMs_ = b.param("_gear_max", kHold), flapsMaxMs_ = b.param("_flaps_max", kHold), flapsAbove_ = b.param("_flaps_above", 0.0);
+    casMs_ = ctx.sensed.airspeedCalibratedMs, gearOut_ = false;
     zoneEndM_ = std::min(std::max(aimM_ + kZoneM, lengthM_ / 3.0), lengthM_ / 2.0);
     wind_.reset();
     touchAglM_ = unstableS_ = crosswindS_ = 0.0;
@@ -297,7 +302,7 @@ void RecoveryBehavior::approachAgain(const ControlContext& ctx, std::uint32_t fr
     o.start = static_cast<double>(from); // (kept: the route plans afresh when its options change)
     route_->begin(ctx, options_);
     phase_ = from == 0 ? Phase::Approach : Phase::Missed;
-    configured_ = gearUp_ = false, flaps_ = kLeastFlaps, speedbrake_ = 0.0, speedAddMs_ = 0.0, slopeS_ = 0.0;
+    configured_ = gearUp_ = gearOut_ = false, flaps_ = kLeastFlaps, speedbrake_ = 0.0, speedAddMs_ = 0.0, slopeS_ = 0.0;
 }
 
 Command RecoveryBehavior::goAround(const ControlContext& ctx, double alongM, double crossM) {
@@ -333,6 +338,9 @@ Command RecoveryBehavior::update(const ControlContext& ctx, const Command& in) {
 Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, double dt) {
     const auto& s = ctx.sensed;
     wind_.update(s, dt);
+    // its placards (4.57): its gear lowered only below its speed (configure), and kept down
+    casMs_ = s.airspeedCalibratedMs;
+    if (configured_ && !gearOut_ && !(casMs_ > gearMaxMs_)) gearOut_ = true;
     double alongM, crossM;
     onLine(thrLat_, thrLon_, courseRad_, s.latitudeRad, s.longitudeRad, alongM, crossM);
     if (phase_ == Phase::Rollout) {
@@ -484,7 +492,7 @@ bool RecoveryBehavior::handOver(BehaviorCommand& out) const {
 
 void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
     if (phase_ == Phase::GoAround) { // (its flaps a takeoff's, its gear up once it climbs, its brakes off)
-        out.flaps = flaps_, out.gearDown = gearUp_ ? 0.0 : 1.0, out.brakeLeft = out.brakeRight = 0.0;
+        out.flaps = placard(flaps_), out.gearDown = gearUp_ ? 0.0 : 1.0, out.brakeLeft = out.brakeRight = 0.0;
         return;
     }
     if (phase_ == Phase::Missed) { // (its chained missed approach flown clean)
@@ -492,10 +500,16 @@ void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
         return;
     }
     if (!configured_) return;
-    out.gearDown = 1.0;
+    out.gearDown = gearOut_ || !(casMs_ > gearMaxMs_) || phase_ == Phase::Rollout ? 1.0 : 0.0;
     // its flaps up on the runway, its lift dumped onto its wheels: with them out, at its touchdown speed, the C-130J and the
     // B-52H flew off again 35 m
-    if (!hovers_) out.flaps = phase_ == Phase::Rollout ? 0.0 : flaps_;
+    if (!hovers_) out.flaps = phase_ == Phase::Rollout ? 0.0 : placard(flaps_);
+}
+
+double RecoveryBehavior::placard(double flaps) const noexcept {
+    // its flaps out past the setting before its landing flaps only below their placard (4.57) - back to it above, as a 767's
+    // flaps 25 and 30 do themselves; its protection holds it below the placard once they are out
+    return casMs_ > flapsMaxMs_ ? std::min(flaps, flapsAbove_) : flaps;
 }
 
 double RecoveryBehavior::speedbrake() const noexcept {

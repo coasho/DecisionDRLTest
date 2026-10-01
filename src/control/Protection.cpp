@@ -125,9 +125,11 @@ Protection protectionFor(const VehicleProfile& profile, std::uint32_t features) 
     return p;
 }
 
-const EnvelopeLimits& activeLimits(const Protection& p, double flapsCommand, double gearPosition, EnvelopeLimits& scratch) noexcept {
+const EnvelopeLimits& activeLimits(const Protection& p, double flapsCommand, double gearCommand, EnvelopeLimits& scratch) noexcept {
+    // the gear's placard while it is commanded down - lowering or down - as the flaps' while they are commanded out (a
+    // retracting gear is flown clean: an aircraft that starts in the air retracts the gear JSBSim starts it with, 4.57)
     const EnvelopeLimits& e = flapsCommand > p.flapsThreshold ? p.flaps : p.clean;
-    if (!known(p.gearCasMaxMs) || gearPosition <= 0.01) return e;
+    if (!known(p.gearCasMaxMs) || !(gearCommand >= 0.5)) return e;
     scratch = e;
     scratch.casMaxMs = known(e.casMaxMs) ? std::min(e.casMaxMs, p.gearCasMaxMs) : p.gearCasMaxMs;
     return scratch;

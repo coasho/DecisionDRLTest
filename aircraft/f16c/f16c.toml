@@ -357,6 +357,14 @@ max_deg = 60
 # F-16 flight manual (-1), Block 10/15 MLU: 25 kt on a dry runway (f-16.net).
 [operations]
 crosswind_kt = 25
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: F-16 limitations (crew study cards, brainscape): the gear extended and
+# retracted at 250 KCAS. Its trailing-edge flaps are scheduled by its flight
+# controls, lowered with the gear handle: no placard of their own.
+gear_kt = 250
+placards_unknown = "its flaps: scheduled by its flight controls, lowered with the gear handle"
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

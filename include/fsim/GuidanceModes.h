@@ -588,6 +588,10 @@ private:
     double speedAddMs_ = 0.0; ///< its approach speed's change for the attitude it comes down at (calibrated)
     double flaps_ = 1.0;      ///< its flaps for landing, eased for that attitude
     double speedbrake_ = 0.0; ///< its drag devices down the glide slope (4.55)
+    double gearMaxMs_ = kHold, flapsMaxMs_ = kHold, flapsAbove_ = 0.0; ///< its placards (4.57): NaN, none
+    double casMs_ = 0.0;      ///< its calibrated airspeed as last updated
+    bool gearOut_ = false;    ///< its gear lowered (below its placard)
+    double placard(double flaps) const noexcept; ///< its flaps within their placard
     double casRateMs2_ = 0.0, lastCasMs_ = 0.0, slopeS_ = 0.0; ///< its calibrated airspeed's rate, smoothed; its time down the slope
     // its go-arounds (4.54)
     WindEstimate wind_;

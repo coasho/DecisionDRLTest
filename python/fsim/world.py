@@ -2130,7 +2130,8 @@ class Vehicle:
         engine that owns thrust, where the aircraft has more than one. An
         Activity (gear and flaps complete when they are there), or fsim.Rejected:
         "unknown_capability" if the aircraft has no such effector, "unavailable"
-        for the placards (gear up on the ground, gear or flaps out too fast). The command envelope as submit's."""
+        for the placards (gear up on the ground, the gear operated above its speed, the flaps past their threshold above
+        theirs). The command envelope as submit's."""
         if kind not in SUPPORT_FIELDS:
             raise ValueError("support kind must be one of %s" % ", ".join(SUPPORT_KINDS))
         r = self._h.submit_support(self.id, SUPPORT_KINDS.index(kind), _row(kind, values, fields), int(source), None, int(range),

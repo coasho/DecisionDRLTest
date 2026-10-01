@@ -240,6 +240,12 @@ max_deg = 50
 # the type: its flying qualities' requirement stands in for it.
 [operations]
 crosswind_kt = 30
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: DCS M-2000C flight manual (RAZBAM): the gear warning flashes with the
+# gear down above 260 KIAS. It has no flaps.
+gear_kt = 260
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

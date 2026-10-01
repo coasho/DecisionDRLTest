@@ -423,6 +423,14 @@ max_deg = 60
 # C-17 flight manual's 25 kt on a paved runway, as c17pilot.com reports it.
 [operations]
 crosswind_kt = 25
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: C-17A speeds (crew study cards, cram.com): flaps 1/2 250 KCAS,
+# 3/4 190, full 175; the gear down 250 KCAS.
+gear_kt = 250
+flaps_kt = 175
+flaps_above = 0.75
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

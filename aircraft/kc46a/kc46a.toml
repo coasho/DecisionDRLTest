@@ -380,6 +380,15 @@ max_deg = 60
 # Crosswind Landing Limits For Airplanes").
 [operations]
 crosswind_kt = 40
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: the Boeing 767-200ER's limitations (crew study cards): flaps 25,
+# 180 kt, flaps 30, 170; the gear operated and extended 270 - the KC-46A's 767-2C
+# airframe, taken as the same.
+gear_kt = 270
+flaps_kt = 170
+flaps_above = 0.833
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

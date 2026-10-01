@@ -454,8 +454,8 @@ void ControlStack::flyGeneral(const ControlContext& ctx, sim::ControlInputs& out
 }
 
 void ControlStack::selectLimits(const ControlContext& ctx, bool state) noexcept {
-    // the configuration the aircraft flew into this update with: the flaps it was given, its gear
-    active_ = &activeLimits(config_->protection, last_.flaps, ctx.state.gearPosition, geared_);
+    // the configuration the aircraft flew into this update with: the flaps and the gear it was given
+    active_ = &activeLimits(config_->protection, last_.flaps, last_.gearDown, geared_);
     if (!state || config_->protection.mode != ProtectionMode::Limit) return;
     const LimitState here = limitState(ctx.sensed, *active_, config_->protection); // as the loops see it
     tasPerCas_ = here.tasPerCas, tasPerMach_ = here.tasPerMach, bankCos_ = here.bankCos;

@@ -369,6 +369,15 @@ max_deg = 60
 # the maximum demonstrated.
 [operations]
 crosswind_kt = 33
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: the Boeing 737NG's limitations (b737.org.uk; 737-700): the gear extended
+# at 270 kt, retracted at 235, extended 320; flaps 30, 175 kt, flaps 40, 162 - the
+# E-7A's 737-700 IGW airframe, taken as the same.
+gear_kt = 235
+flaps_kt = 162
+flaps_above = 0.75
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

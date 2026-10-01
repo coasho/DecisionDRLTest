@@ -356,6 +356,8 @@
       <property value="17.8481">fsim/envelope/clean/alpha_max_deg</property>
       <property value="25.4185">fsim/envelope/clean/cas_min_ms</property>
       <property value="7.72">fsim/envelope/crosswind_max_ms</property>
+      <property value="43.73">fsim/envelope/flaps/cas_max_ms</property>
+      <property value="0.333">fsim/envelope/flaps_threshold</property>
       <property value="12.98">fsim/envelope/ground_pitch_max_deg</property>
       <property value="9.55">fsim/envelope/ground_turn_radius_m</property>
       <property value="0.4245">fsim/envelope/ground_yaw_accel_rad_s2</property>

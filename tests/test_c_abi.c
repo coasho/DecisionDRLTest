@@ -2406,12 +2406,12 @@ int main(int argc, char** argv) {
                 }
                 CHECK(fsim_vehicle_set_control_mode(world, merlin, FSIM_CONTROL_OPEN) == FSIM_OK);
             }
-            /* a support command; one not live */
+            /* a support command (the flaps: its gear above its placard, docs/flight-autonomy.md 4.57); one not live */
             {
                 const double up[1] = {0.0};
                 fsim_activity_id gone = cr.activity;
-                CHECK(fsim_vehicle_submit_support(world, merlin, FSIM_SUPPORT_GEAR, up, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
-                CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_SUPPORT && sp.code == FSIM_SUPPORT_GEAR);
+                CHECK(fsim_vehicle_submit_support(world, merlin, FSIM_SUPPORT_FLAPS, up, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_SUPPORT && sp.code == FSIM_SUPPORT_FLAPS);
                 CHECK(sp.count == 1 && sp.fields[0] == 0.0);
                 CHECK(fsim_activity_cancel(world, gone, &cr) == FSIM_OK);
                 CHECK(fsim_activity_get_setpoint(world, gone, &sp) == FSIM_INVALID_ARGUMENT);

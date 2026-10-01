@@ -1527,6 +1527,43 @@ class GroundGeometry(unittest.TestCase):
         self.assertEqual(sections(aircraft, {"options": {}}, {}, {}, {})["envelope"]["crosswind_max_ms"], 12.86)
         self.assertNotIn("crosswind_max_ms", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
 
+    def test_the_profile_carries_its_placards(self):
+        # the design's [operations] gear_kt, flaps_kt and flaps_above, in m/s (4.57); none given, none written
+        from hangar.profile import sections
+        aircraft = Profile().fighter()
+        aircraft.spec["operations"] = {"gear_kt": 168.0, "flaps_kt": 145.0, "flaps_above": 0.5}
+        env = sections(aircraft, {"options": {}}, {}, {}, {})["envelope"]
+        self.assertEqual((env["gear_cas_max_ms"], env["flaps/cas_max_ms"], env["flaps_threshold"]), (86.43, 74.59, 0.5))
+        aircraft.spec["operations"] = {"flaps_kt": 250.0}
+        env = sections(aircraft, {"options": {}}, {}, {}, {})["envelope"]
+        self.assertEqual((env["flaps/cas_max_ms"], env["flaps_threshold"]), (128.61, 0.05))
+        self.assertNotIn("gear_cas_max_ms", env)
+        self.assertNotIn("flaps/cas_max_ms", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
+
+    def test_every_design_records_its_placards_or_why_not(self):
+        # B-7: a design whose gear retracts records the most it moves it at, one with flaps the most with them out - from
+        # a published source - or says why it cannot (placards_unknown)
+        import glob
+        import tomllib
+        for path in sorted(glob.glob(repo("aircraft/*/*.toml"))):
+            name = os.path.basename(os.path.dirname(path))
+            if os.path.basename(path) != name + ".toml":
+                continue
+            with open(path, "rb") as f:
+                spec = tomllib.load(f)
+            if spec.get("aircraft", {}).get("category") in ("helicopter", "multirotor"):
+                continue
+            ops = spec.get("operations", {})
+            retracts = any(g.get("retractable", False) for g in spec.get("gear", []))
+            flaps = any(c.get("channel") == "flap" for s in spec.get("surface", []) for c in s.get("controls", []))
+            with self.subTest(design=name):
+                if retracts:
+                    self.assertTrue("gear_kt" in ops or "placards_unknown" in ops)
+                if flaps:
+                    self.assertTrue("flaps_kt" in ops or "placards_unknown" in ops)
+                if "flaps_above" in ops:
+                    self.assertTrue(0.0 <= ops["flaps_above"] < 1.0 and "flaps_kt" in ops)
+
     def test_a_tricycles_balance(self):
         # the nose wheel's share and the tip-back angle at the parked attitude:
         # the lever rule along the ground, with a nose-high stance moving the CG aft

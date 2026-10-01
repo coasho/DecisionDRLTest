@@ -439,7 +439,7 @@ struct CapabilityDescriptor {
 | Availability | Meaning |
 | --- | --- |
 | `Available` | may be commanded |
-| `TemporarilyUnavailable` | a condition that will pass: weight on wheels for a gear retraction, above the placard speed for flaps or gear, a diverged vehicle |
+| `TemporarilyUnavailable` | a condition that will pass: weight on wheels for a gear retraction, above the gear's placard speed (not operated), a diverged vehicle; above the flaps' placard speed their range narrows to their threshold ([flight-autonomy.md](flight-autonomy.md), 4.57) |
 | `Faulted` | an effector has failed (reserved for effects, section 5) |
 | `Disabled` | switched off by a setting for this vehicle |
 

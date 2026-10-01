@@ -179,6 +179,13 @@ reference = "jsbsim:c172x"  # fly the same tests on this JSBSim aircraft and com
 # Cessna 172P POH: 15 kt, the maximum demonstrated.
 [operations]
 crosswind_kt = 15
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: Cessna 172S Pilot's Operating Handbook, section 2: VFE 110 KIAS to 10 deg
+# of flap, 85 from 10 to 30. Its gear is fixed.
+flaps_kt = 85
+flaps_above = 0.333
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into

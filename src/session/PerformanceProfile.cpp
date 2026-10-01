@@ -90,7 +90,7 @@ control::Reason World::performanceProfile(std::uint32_t id, control::FlightMode 
     auto airspeeds = [&](double h, double flownLo, double flownHi, double endurance, double range) {
         const double lo = out.flapsOut ? tasOfCas(lim.casMinMs, h) : most(flownLo, tasOfCas(lim.casMinMs, h));
         double hi = least(least(flownHi, tasOfCas(lim.casMaxMs, h)), tasOfMach(lim.machMax, h));
-        if (out.gearDown) hi = least(hi, tasOfCas(env.gearCasMaxMs, h));
+        if (in && in->gearDown >= 0.5) hi = least(hi, tasOfCas(env.gearCasMaxMs, h)); // (commanded down: its placard, 4.57)
         if (std::isfinite(lo)) out.minAirspeed.push_back(ProfilePoint{lo, kNone, h, w});
         if (std::isfinite(hi)) out.maxAirspeed.push_back(ProfilePoint{hi, kNone, h, w});
         if (std::isfinite(endurance)) out.bestEnduranceAirspeed.push_back(ProfilePoint{endurance, kNone, h, w});

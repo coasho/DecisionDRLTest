@@ -435,8 +435,9 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
 /* NEW for a support effector the vehicle has, set directly beside the cascade.
  * Fields: gear [down: 1 or 0], flaps [position 0..1], wheel brakes [left,
  * right 0..1], speedbrake [position 0..1], pitch trim [position -1..1, + nose
- * down]. Refused as "unavailable" by the placards: no gear up on the ground, no
- * gear or flaps out above their speeds. fsim_activity_update takes the same fields.
+ * down]. Refused as "unavailable" by the placards: no gear up on the ground, the
+ * gear not operated above its speed, no flaps past their threshold above theirs.
+ * fsim_activity_update takes the same fields.
  * FSIM_SUPPORT_ENGINES is fsim.flight.engines, where the aircraft has more than
  * one engine: a throttle 0..1 per engine (1 to 4 fields; fsim_hold() keeps one),
  * owning thrust beside the cascade. */

@@ -302,6 +302,14 @@ max_speed_altitude_ft = 22000
 # C-130J-30 operating limits (crew study cards): 35 kt on a dry runway.
 [operations]
 crosswind_kt = 35
+# Its placards (docs/flight-autonomy.md, 4.57): the most it moves its gear at
+# (the lesser of extending and retracting it), and the most with its flaps out
+# beyond flaps_above (the setting before its landing flaps), KIAS - or why there
+# are none. Source: 1C-130J-1 limitations (crew study cards): the gear 168 KIAS;
+# the flaps 50 % 183, 100 % 145.
+gear_kt = 168
+flaps_kt = 145
+flaps_above = 0.5
 
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
