@@ -159,8 +159,9 @@ TEST_CASE("discovery: applicable but not built is not implemented, with the stag
     CHECK(w.submit(viper, SpeedbrakeCommand{1.0}).reason == Reason::NotImplemented);
     CHECK(w.capabilityStatus(viper, "fsim.support.speedbrake").reason == Reason::NotImplemented);
     CHECK(supportOf(w, viper, "fsim.guidance.launch").support == Support::Supported); // (built by FA-9a)
-    CHECK(supportOf(w, viper, "fsim.guidance.recovery").support == Support::NotImplemented); // (FA-10's)
-    CHECK(supportOf(w, viper, "fsim.guidance.recovery").stage == 10);
+    CHECK(supportOf(w, viper, "fsim.guidance.recovery").support == Support::Supported); // (built by FA-10a)
+    CHECK(supportOf(w, viper, "fsim.guidance.recovery/go_around").support == Support::NotImplemented); // (FA-10b's)
+    CHECK(supportOf(w, viper, "fsim.guidance.recovery/go_around").stage == 10);
     CHECK(w.submit(viper, behavior("launch")).reason == Reason::Airborne); // a ground mode, the Viper flying
     // an id no platform defines is unknown, as before; its status is Unavailable, not Disabled
     CHECK(w.submit(viper, behavior("warp_drive")).reason == Reason::UnknownCapability);

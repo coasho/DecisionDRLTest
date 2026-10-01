@@ -33,6 +33,7 @@ constexpr double kGearUpAglM = 10.0, kFlapsUpAglM = 120.0;
 constexpr double kReactionS = 1.0, kBrakeMs2 = 2.5, kEndMarginM = 30.0, kRotateS = 5.0, kLineLostM = 11.25;
 constexpr double kJudgeFromShare = 0.3, kJudgeAfterS = 40.0, kNoGoS = 1.0;
 constexpr double kStoppedMs = 0.3; // stopped: slower than this for a second
+constexpr double kDerotateRadS = 2.0 * kDeg; // a landing's nose lowered so fast onto its nose wheel (4.53)
 
 double clamp1(double x) noexcept { return std::clamp(x, -1.0, 1.0); }
 
@@ -144,7 +145,7 @@ void LaunchBehavior::reset() {
     rotateStartS_ = airborneS_ = lastS_ = rollStartS_ = -1.0;
     crossIntegral_ = settledS_ = pitchIntegral_ = pitchRefRad_ = rotateFromRad_ = accelMs2_ = lastGroundSpeed_ = stoppedS_ = casMs_ = noGoS_ = 0.0;
     lineUpS_ = 0.0;
-    gearUp_ = flapsUp_ = own_ = false;
+    gearUp_ = flapsUp_ = own_ = derotating_ = false;
     onGround_ = true;
 }
 
@@ -188,6 +189,13 @@ void LaunchBehavior::startResolved(const ControlContext& ctx, const RouteGround&
     parkedRad_ = s.eulerRad[1];
     lastGroundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (hovers_) startLat_ = s.latitudeRad, startLon_ = s.longitudeRad, phase_ = Phase::Lift;
+}
+
+void LaunchBehavior::startRollout(const ControlContext& ctx, const RouteGround& line) {
+    startResolved(ctx, line, completeAglM_, hoverAglM_);
+    // its nose lowered from where it touched down at kDerotateRadS onto its nose wheel, level - its brakes once it is there
+    own_ = true, phase_ = Phase::Reject, derotating_ = true;
+    parkedRad_ = std::max(ctx.sensed.eulerRad[1], 0.0), pitchRefRad_ = parkedRad_, rollStartS_ = ctx.sensed.simTime;
 }
 
 bool LaunchBehavior::canStop(double speedMs) const noexcept {
@@ -247,6 +255,11 @@ Command LaunchBehavior::reject(const ControlContext& ctx) {
     ActuatorCommand a;
     a.throttle = 0.0, a.brakeLeft = a.brakeRight = 1.0;
     a.gearDown = 1.0, a.flaps = kTakeoffFlaps;
+    if (derotating_) { // (a landing's rollout: its nose lowered first, its brakes off until it is down - 4.53)
+        parkedRad_ = std::max(parkedRad_ - kDerotateRadS * dt, 0.0);
+        if (parkedRad_ <= 0.0) derotating_ = false; // (down: the B-52H rests on its bicycle gear 1 deg nose up)
+        else a.brakeLeft = a.brakeRight = 0.0;
+    }
     a.rudder = steer(s, dt);
     a.aileron = clamp1(-2.0 * s.eulerRad[0] - 0.5 * s.angularRateBodyRadS[0]);
     // its nose held at its parked attitude: down only - a tricycle's nose wheel kept loaded to steer, its strut's give

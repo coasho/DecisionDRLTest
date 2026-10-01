@@ -1014,6 +1014,7 @@ struct RouteGround {
     // its takeoff's, as a launch's NEW resolves them (4.49): the takeoff line, the speeds, the rotation attitude
     double startLatitudeRad = 0.0, startLongitudeRad = 0.0, courseRad = 0.0, lengthM = 0.0;
     double rotationCasMs = 0.0, climbCasMs = 0.0, rotationRad = 0.0, airfield = 0.0, runway = 0.0;
+    double elevationM = 0.0; ///< a landing line's: its threshold's (4.53)
 };
 
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
@@ -1467,6 +1468,12 @@ public:
         (void)out;
         return false;
     }
+    /// Whether it sets the support effectors its activity owns - the flaps, the gear, the brakes - while it flies above the
+    /// actuators (configure; docs/flight-autonomy.md, 4.53): asked once, as it begins. A behaviour that does not is flown as before.
+    virtual bool configures() const noexcept { return false; }
+    /// Those it sets, as of its last update, into the actuator command the levels below it made: a field left as it is, not set.
+    /// Only the axes its activity owns are taken from it.
+    virtual void configure(ActuatorCommand& out) const noexcept { (void)out; }
 };
 
 /// What the cascade asked for in its last control update, level by level

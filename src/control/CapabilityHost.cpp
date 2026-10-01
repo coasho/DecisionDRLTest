@@ -1258,7 +1258,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
-    grounded_ = false;
+    grounded_ = laidRoute_ = false;
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) { // its waypoints completed, and checked as its range policy says
         // (one that starts on the ground: its taxi and takeoff first, its points from where it has taken off - 4.52)
         const Reason why = startsOnGround(*route, waypoints, extras ? extras->paths : Span<const RoutePath>{})
@@ -1277,6 +1277,8 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
             if (const Reason why = prepareLaunch(*b, state, detail); why != Reason::None) return why;
         } else if (b->id == "taxi") {
             if (const Reason why = prepareTaxi(*b, state, detail); why != Reason::None) return why;
+        } else if (b->id == "recovery") {
+            if (const Reason why = prepareRecovery(*b, state, log); why != Reason::None) return why;
         }
     }
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
@@ -1413,7 +1415,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     }
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
-    const bool laid = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's route written as a route's: 4.42)
+    const bool laid = route || std::holds_alternative<MustFlyCommand>(setpoint) || laidRoute_; // (a must fly's, a recovery's: 4.42, 4.53)
     // (a mode beside the command variant: a marshall's pattern, its stack beside it; an intercept's route, its join laid afresh - 4.46, 4.47)
     const SetpointKind late = d.setpoint == SetpointKind::Marshall || d.setpoint == SetpointKind::Intercept ? d.setpoint : SetpointKind::Count;
     RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
@@ -1652,7 +1654,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
     const auto* route = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = route ? route->start : kHold;
-    const bool routed = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's laid out as a route: 4.42)
+    const bool routed = route || std::holds_alternative<MustFlyCommand>(setpoint) || laidRoute_; // (a must fly's, a recovery's: 4.42, 4.53)
     if ((routed || std::holds_alternative<CurveCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint)) && !config_->path)
         config_->path = std::make_unique<PathStore>();
     launch(Launch{nullptr, id, index, axes, flags, firstStart}, options, std::move(setpoint), std::move(behavior), routed, segments, now);

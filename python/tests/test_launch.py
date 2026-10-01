@@ -176,6 +176,37 @@ class LaunchTest(unittest.TestCase):
             flying.submit_route(taxi + runway + air)
         self.assertEqual(refused.exception.reason, "airborne")
 
+    def test_a_recovery(self):
+        # RECOVERY to a runway 8 km ahead (4.53): down the glide slope, touched down in the zone below its sink-rate limit, stopped
+        w = world("py-recovery")
+        v = w.create_vehicle("c172", "jsbsim:c172", latitude_deg=40.0, longitude_deg=0.0, altitude_msl_m=300.0, heading_deg=0.0, airspeed_ms=45.0)
+        w.step(10)
+        s = v.state
+        lat0, lon0, ground = s.latitude_rad + 8000.0 / R, s.longitude_rad, s.altitude_msl_m - s.altitude_agl_m
+        start = fsim.RunwayPoint(lat0, lon0, ground)
+        limit = fsim.RunwayPoint(lat0 + 3000.0 / R, lon0, ground)
+        v.load_airfield(fsim.Airfield(7, "", fsim.HOLD, (fsim.Runway(3, 0.0, 3000.0, fsim.RunwayCoordinates(), fsim.RunwayCoordinates(start, start, limit)),)))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_behavior("recovery", airfield=7, runway=4)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("unknown_airfield", 1))
+        a = v.submit_behavior("recovery", airfield=7, runway=3)
+        self.assertEqual(v.support("fsim.guidance.recovery").support, fsim.Support.SUPPORTED)
+        touched, sink = None, 0.0
+        for _ in range(3000):
+            w.step(int(round(0.5 / w.step_seconds)))
+            s = v.state
+            if touched is None and not s.on_ground:
+                sink = s.velocity_ned_ms[2]
+            if touched is None and s.on_ground:
+                touched = (s.latitude_rad - lat0) * R
+            if a.info.state not in (fsim.ActivityState.PENDING, fsim.ActivityState.ACTIVE):
+                break
+        self.assertEqual(a.info.state, fsim.ActivityState.COMPLETED)
+        self.assertIsNotNone(touched)
+        self.assertTrue(0.0 < touched < 900.0)  # (its touchdown zone: 279 m along)
+        self.assertLess(sink, 3.2)               # (1.05 m/s)
+        self.assertLess(math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1]), 0.5)
+
     def test_refusals(self):
         w = world("py-launch-refused")
         v, _, _ = parked(w, "c172")

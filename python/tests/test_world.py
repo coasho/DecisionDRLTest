@@ -314,7 +314,7 @@ class CapabilityTest(unittest.TestCase):
                                                        "CURVE_FOLLOWING": ["fsim.guidance.curve"], "FORMATION": ["fsim.guidance.formation"],
                                                        "HSA_CSA": ["fsim.guidance.hsa"], "LOITER": ["fsim.guidance.pattern"],
                                                        "LAUNCH": ["fsim.guidance.launch"], "MUST_FLY": ["fsim.guidance.must_fly"],
-                                                       "ROUTE_INTERCEPT": ["fsim.guidance.intercept"],
+                                                       "RECOVERY": ["fsim.guidance.recovery"], "ROUTE_INTERCEPT": ["fsim.guidance.intercept"],
                                                        "WAYPOINT_FOLLOWING": ["fsim.guidance.taxi", "fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")

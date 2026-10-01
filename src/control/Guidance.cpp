@@ -1632,7 +1632,8 @@ void registerGuidanceModes(ControllerRegistry& r) {
     r.addBehavior("curve", [] { return std::make_unique<CurveBehavior>(); }, std::move(curve));
     registerMustFly(r); // (docs/flight-autonomy.md, 4.42)
     registerMarshall(r, patternShape); // (4.46)
-    registerIntercept(r);               // (4.47)
+    registerIntercept(r);
+    registerRecovery(r);                // (4.53)               // (4.47)
 }
 
 } // namespace fsim::control

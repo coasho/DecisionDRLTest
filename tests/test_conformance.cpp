@@ -641,8 +641,8 @@ public:
     }
 
     /// What a walk draws: the later stages' capabilities where it optimises; never a ground mode - it flies (a launch: its
-    /// NEW and lifecycle are test_launch.cpp's)
-    bool drawable(const CapabilityDescriptor& d) const { return (optimise || !late(d)) && !d.ground; }
+    /// NEW and lifecycle are test_launch.cpp's) - nor a recovery, to an airfield it keeps none of (test_recovery.cpp's)
+    bool drawable(const CapabilityDescriptor& d) const { return (optimise || !late(d)) && !d.ground && d.behavior != "recovery"; }
 
     static bool isSupport(const CapabilityDescriptor& d) {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
@@ -795,6 +795,15 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
             BehaviorCommand b;
             b.id = d.behavior;
             CHECK(w.submit(v, b).reason == Reason::Airborne);
+            continue;
+        }
+        if (d.behavior == "recovery") { // to an airfield the vehicle keeps: none here, refused naming it (its lifecycle: test_recovery.cpp)
+            CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);
+            BehaviorCommand b;
+            b.id = d.behavior;
+            const CommandResult r = w.submit(v, b);
+            CHECK(r.reason == Reason::UnknownAirfield);
+            CHECK(r.index == 0);
             continue;
         }
         CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);

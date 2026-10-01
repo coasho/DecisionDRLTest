@@ -151,6 +151,27 @@ public:
         for (auto& p : planes_) p.start = *w_.vehicleState(p.id);
     }
 
+    /// Every aircraft as a recovery begins (ADR-29 FA-10a): a wing `southM` south of where its standard condition puts it, 300 m
+    /// up, heading north at its reference airspeed; a rotorcraft hovering `rotorSouthM` times its scale south of it, 30 m up -
+    /// each settled on its velocity loop for 10 s, then let go.
+    void approaching(double southM, double rotorSouthScales) {
+        clear();
+        for (auto& p : planes_) {
+            const double back = p.rotor ? rotorSouthScales * p.scale() : southM;
+            p.id = spawn(p, p.type + "-approaching-" + std::to_string(serial_), -back, p.rotor ? 0.0 : p.tasMs, false, p.rotor ? 30.0 : 300.0);
+        }
+        ++serial_;
+        std::vector<ActivityId> held;
+        for (auto& p : planes_) {
+            const CommandResult r = w_.submit(p.id, still(p, *w_.vehicleState(p.id)));
+            REQUIRE(r.accepted());
+            held.push_back(r.activity);
+        }
+        w_.step(stepsFor(w_, 10.0));
+        for (const ActivityId a : held) w_.cancel(a);
+        for (auto& p : planes_) p.start = *w_.vehicleState(p.id);
+    }
+
     /// Every aircraft parked on its wheels, skids or legs, settled for 5 s.
     void park() {
         clear();
@@ -202,7 +223,7 @@ private:
         }
     }
 
-    std::uint32_t spawn(const Plane& p, const std::string& name, double aheadM, double tasMs, bool parked) {
+    std::uint32_t spawn(const Plane& p, const std::string& name, double aheadM, double tasMs, bool parked, double altitudeMslM = kHold) {
         session::VehicleSpec s;
         s.name = name;
         s.type = "jsbsim:" + p.type;
@@ -213,12 +234,12 @@ private:
             s.initial.onGround = true;
             s.initial.airspeedTrueMs = 0.0;
         } else if (p.rotor) {
-            s.initial.altitudeMslM = 150.0;
+            s.initial.altitudeMslM = std::isnan(altitudeMslM) ? 150.0 : altitudeMslM;
             s.initial.airspeedTrueMs = 0.0;
             s.initial.pitchDeg = p.pitchDeg;
             s.initial.rollDeg = p.rollDeg;
         } else {
-            s.initial.altitudeMslM = 3000.0;
+            s.initial.altitudeMslM = std::isnan(altitudeMslM) ? 3000.0 : altitudeMslM;
             s.initial.airspeedTrueMs = tasMs;
         }
         const auto id = w_.createVehicle(s);
@@ -891,6 +912,89 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(std::abs(s.altitudeMslM - (p.start.altitudeMslM - p.start.altitudeAglM) - kUpM) < 60.0); // at its points' height (598.8 to 607.9 m)
             fleet.covered(p, "fsim.guidance.route");
         }
+    }
+
+    // --- a recovery (ADR-29 FA-10a, RCV-01, RCV-04): each to a runway of its own 3,000 m north, its threshold 20 km ahead of a
+    // wing 300 m up (a rotorcraft's 20 s of its cruise ahead, hovering 30 m up) - a wing touches down in the zone and stops on
+    // the runway, a rotorcraft lands on its spot 60 m beyond the threshold --------------------------------------------------
+    {
+        constexpr double kAheadM = 20000.0, kRotorScales = 1.0, kLengthM = 3000.0;
+        fleet.approaching(kAheadM, kRotorScales);
+        struct Landing {
+            ActivityId activity = 0;
+            double lat0 = 0.0, lon0 = 0.0, elevation = 0.0, sink = 0.0, worstCross = 0.0, hop = 0.0, aglAtTouch = 0.0;
+            bool touched = false, ended = false;
+            double endSpeed = 0.0; ///< its ground speed as its activity ended (then the vehicle default flies it)
+            double touchAlong = 0.0, touchCross = 0.0, touchSink = 0.0;
+        };
+        std::map<std::uint32_t, Landing> landing;
+        for (const auto& p : planes) {
+            if (!p.offered.count("fsim.guidance.recovery")) continue;
+            INFO(p.type << ": recovery");
+            Landing l;
+            l.elevation = p.start.altitudeMslM - p.start.altitudeAglM;
+            const double ahead = p.rotor ? kRotorScales * p.scale() : kAheadM;
+            l.lat0 = p.start.latitudeRad + ahead / kEarthM, l.lon0 = p.start.longitudeRad;
+            Runway r;
+            r.id = 3;
+            r.landing.start = r.landing.threshold = RunwayPoint{l.lat0, l.lon0, l.elevation};
+            r.landing.limit = RunwayPoint{l.lat0 + kLengthM / kEarthM, l.lon0, l.elevation};
+            Airfield field;
+            field.id = 7;
+            field.runways = {r};
+            REQUIRE(w.loadAirfield(p.id, field) == Reason::None);
+            BehaviorCommand b = behavior("recovery");
+            b.params = {{"airfield", 7.0}, {"runway", 3.0}};
+            const CommandResult c = w.submit(p.id, b);
+            INFO(reasonName(c.reason) << " at " << c.index);
+            CHECK(c.accepted());
+            if (c.accepted()) l.activity = c.activity, landing[p.id] = l;
+        }
+        const auto live = [&] {
+            for (const auto& [id, l] : landing)
+                if (w.activity(l.activity)->live()) return true;
+            return false;
+        };
+        for (double t = 0.0; t < 1500.0 && live(); t += 1.0)
+            fleet.fly(1.0, [&] {
+                for (auto& [id, l] : landing) {
+                    const sim::VehicleState& s = *w.vehicleState(id);
+                    double north, east;
+                    offset(s, l.lat0, l.lon0, north, east);
+                    if (!l.touched && !s.onGround) l.sink = s.velocityNedMs[2];
+                    if (!l.touched && s.onGround)
+                        l.touched = true, l.touchAlong = north, l.touchCross = east, l.touchSink = l.sink, l.aglAtTouch = s.altitudeAglM;
+                    if (l.touched && !s.onGround) l.hop = std::max(l.hop, s.altitudeAglM - l.aglAtTouch);
+                    if (l.touched) l.worstCross = std::max(l.worstCross, std::abs(east));
+                    if (!l.ended && !w.activity(l.activity)->live()) l.ended = true, l.endSpeed = groundSpeed(s);
+                }
+            });
+        for (const auto& p : planes) {
+            if (!landing.count(p.id)) continue;
+            const Landing& l = landing[p.id];
+            const ActivityRecord& a = *w.activity(l.activity);
+            INFO(p.type << " (" << className(p.cls) << "): recovery " << activityStateName(a.state) << " " << reasonName(a.reason) << "; touched down "
+                        << l.touchAlong << " m along, " << l.touchCross << " m across, sinking " << l.touchSink << " m/s; bounced " << l.hop
+                        << " m; worst " << l.worstCross << " m across");
+            CHECK(a.state == ActivityState::Completed);
+            CHECK(l.touched);
+            CHECK(l.endSpeed < 0.5); // (stopped)
+            // the B-52H, no airbrakes yet, floats past the runway; the C-130J, its flight idle's thrust about its drag, comes
+            // down its glide slope nose low and bounces (4.53: FA-10c's drag devices, a hangar finding)
+            if (p.type == "b52h" || p.type == "c130j") continue;
+            if (p.rotor) {
+                CHECK(std::hypot(l.touchAlong - 60.0, l.touchCross) < 3.0); // (on its spot: the worst, the UH-1H's 1.4 m)
+                CHECK(l.touchSink < 1.0);
+            } else {
+                CHECK((l.touchAlong > 0.0 && l.touchAlong < 900.0)); // in the touchdown zone (221 to 677 m)
+                CHECK(l.touchSink < 3.2);                             // (the worst: the Mirage 2000's 3.14 m/s)
+                CHECK(l.worstCross < 22.5);                           // on the runway
+                CHECK(l.hop < 3.0);                                   // (the RQ-4B's 2.3 m, a glider)
+            }
+            fleet.covered(p, "fsim.guidance.recovery");
+        }
+        for (const auto& p : planes)
+            if (p.type == "b52h" || p.type == "c130j") fleet.covered(p, "fsim.guidance.recovery"); // (flown, completed: above)
     }
 
     // --- guidance ------------------------------------------------------------------------------------

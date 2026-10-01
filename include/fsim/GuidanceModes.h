@@ -536,6 +536,47 @@ private:
     std::uint32_t areaRevision_ = 0;       ///< the path store's revision its zone was looked for in
 };
 
+/// "recovery": A-GRA's RECOVERY to an airfield's runway (docs/flight-autonomy.md, 4.53; ADR-29 FA-10a). params: airfield and
+/// runway (their ids: the vehicle's, 4.40). The host resolves the runway's landing line at the NEW and lays out the approach as
+/// a route in the path store. A wing flies it at its approach speed onto the extended centre line and down a 3 deg glide slope,
+/// its gear and flaps out from the intermediate fix on; flares - its sink eased to its height over 3 s, its speed bled off -
+/// touches down and rolls out as a rejected takeoff stops, on the centre line, then completes stopped. A rotorcraft flies to a
+/// hover 10 m over the runway, descends straight down and completes on the ground, its collective down.
+class FSIM_API RecoveryBehavior final : public Behavior {
+public:
+    enum class Phase : std::uint8_t { Approach, Flare, Rollout, Descent, Landed };
+    RecoveryBehavior();
+    ~RecoveryBehavior() override;
+    const char* id() const noexcept override { return "recovery"; }
+    void start(const ControlContext& ctx, const BehaviorCommand& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override;
+    Reason failure() const noexcept override;
+    std::uint16_t constraints() const noexcept override;
+    bool progress(ActivityProgress& out) const noexcept override;
+    bool handOver(BehaviorCommand& out) const override;
+    bool configures() const noexcept override { return true; }
+    void configure(ActuatorCommand& out) const noexcept override;
+    Phase phase() const noexcept { return phase_; }
+
+private:
+    Command runway(const ControlContext& ctx, const Command& in, double dt);
+    Command vertical(const ControlContext& ctx, double dt);
+    std::unique_ptr<RouteBehavior> route_;    ///< flies the approach: allocated with the behaviour
+    std::unique_ptr<LaunchBehavior> rollout_; ///< a wing's rollout: likewise
+    Command options_;                         ///< the approach route's options (a RouteCommand)
+    Phase phase_ = Phase::Approach;
+    bool hovers_ = false, configured_ = false;
+    double thrLat_ = 0.0, thrLon_ = 0.0, courseRad_ = 0.0, lengthM_ = 0.0, elevationM_ = 0.0, vappMs_ = 0.0, aimM_ = 0.0;
+    double airfield_ = 0.0, runway_ = 0.0, settledS_ = 0.0, lastS_ = -1.0, descentMslM_ = 0.0;
+    double tailRad_ = kHold, flarePitchRad_ = 0.0, flareIntegral_ = 0.0; ///< its tail's touching attitude; its flare's
+    double speedAddMs_ = 0.0; ///< its approach speed's change for the attitude it comes down at (calibrated)
+    double flaps_ = 1.0;      ///< its flaps for landing, eased for that attitude
+};
+/// Registers "recovery" (Recovery.cpp); registerGuidanceModes calls it.
+void registerRecovery(ControllerRegistry& registry);
+
 /// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly", "marshall", "intercept");
 /// registerBuiltinControllers calls it.
 void registerGuidanceModes(ControllerRegistry& registry);

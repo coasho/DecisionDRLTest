@@ -188,11 +188,11 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.launch/carrier_catapult", "fsim.guidance.launch", N, 11, R3, ""},         // LCH-05
     {"fsim.guidance.launch/carrier_proceed", "fsim.guidance.launch", N, 11, R3 | R4, ""},     // LCH-06
     {"fsim.guidance.launch/carrier_join_up", "fsim.guidance.launch", N, 11, R3 | R4, ""},     // LCH-07
-    CAP("fsim.guidance.recovery", N, 10, 0, ""),                                              // RCV-01
-    {"fsim.guidance.recovery/runway", "fsim.guidance.recovery", N, 10, 0, ""},
+    CAP("fsim.guidance.recovery", S, 10, 0, ""),                                              // RCV-01
+    {"fsim.guidance.recovery/runway", "fsim.guidance.recovery", S, 10, 0, "", false, nullptr, true},
     {"fsim.guidance.recovery/go_around", "fsim.guidance.recovery", N, 10, 0, ""},             // RCV-02
     {"fsim.guidance.recovery/missed_approach", "fsim.guidance.recovery", N, 10, 0, ""},       // RCV-03
-    {"fsim.guidance.recovery/vertical", "fsim.guidance.recovery", N, 10, R1, ""},             // RCV-04
+    {"fsim.guidance.recovery/vertical", "fsim.guidance.recovery", S, 10, R1, ""},             // RCV-04
     {"fsim.guidance.recovery/carrier", "fsim.guidance.recovery", N, 11, R3 | R4, ""},         // RCV-05
     {"fsim.guidance.recovery/carrier_delta", "fsim.guidance.recovery", N, 11, R3 | R4, ""},   // RCV-06
     {"fsim.guidance.recovery/carrier_calls", "fsim.guidance.recovery", N, 11, R3 | R4, ""},   // RCV-07

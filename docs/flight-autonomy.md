@@ -1412,6 +1412,30 @@ A-GRA's route reaches the ground at both ends: its waypoint types name a taxi's 
   - its taxi points (`/taxi`): partial on a wing, missing a taxi alone, after a landing (FA-10).
 - **Surfaces.** C++: `RouteGround` and `PathStore::routeGround`; `RouteBehavior::handOver`; `LaunchBehavior::write` and `startResolved`, `TaxiBehavior::write` and `startResolved`. No new C ABI or Python call: a route's waypoint types, paths, branches and a plan's path metadata already go through. Python's twin flies them.
 
+### 4.53 A-GRA's recovery to a runway (as FA-10a builds it)
+
+A-GRA's RECOVERY, for an airfield, is MA_AirfieldLandType: an AirfieldID and a RunwayID, nothing more (VI 1.4 row 10.2; RCV-01). Its rotorcraft's is an approach to a hover and a vertical landing (RCV-04). It is the platform behaviour `fsim.guidance.recovery`, of A-GRA's RECOVERY type: with it all ten of A-GRA's flight capability types are offered (CAP-02).
+
+- **Its command:** `airfield` and `runway`, ids the vehicle keeps (4.40). Its NEW resolves the runway's landing line (`CapabilityHost::landingLine`): its threshold (else its start), on to its limit (else on its direction), at its threshold's elevation (else the ground's there). It refuses `unknown_airfield` naming field 0 or 1, and `invalid_parameter` on field 1 for a runway with no landing coordinates. A policy's is offered in the air; on the ground it is refused `on_ground` (4.5).
+- **A wing's approach** is a route the host lays out at the NEW, written to the path store as a must fly's is (4.42), and flown by the behaviour's route:
+  - a base point to the aircraft's side of the extended centre line, 2.5 turn radii off it, abeam the intermediate fix: any turn about is made there, clean, at 1.6 times its stall. Led straight to a fix behind it, the F-16C turned about there while slowing to its approach speed, and spun in;
+  - the intermediate fix on the centre line, then level to the final approach fix, at least a minute at its speed there: it slows to its approach speed, its gear and flaps out;
+  - down a 3 deg glide slope from the final approach fix - 5 km out at least, three turn radii - to its aim, 286 m beyond the threshold (15 m over it), or a third of the runway where that is shorter.
+
+  The fixes move out along the centre line until the descent to the base point is no steeper than 3.5 %. From 1,000 m 16 km out, the C-130J came down 8 % and reached the glide slope at 107 m/s against its 71. Its turns are planned at 25 deg of bank, and none is flown steeper than 35 deg: the route's capture of its first leg banked the EA-18G to 81 deg at 1.6 times its least speed, and it departed. A plain route does the same: a finding (section 14, FA-10a).
+- **Its speeds:** 1.3 times its stall (its least: a fly-by-wire fighter's) from the final approach fix on, 1.6 times it before. No design measures its stall with its flaps out; hangar's trim with them all out could not be flown (the C172's read 27 to 45 kt by where it began). So:
+  - its flaps start at a takeoff's (4.49), flown on every wing;
+  - level before the glide slope, they go out further while it would come down the slope less than 6 deg under its tail's touching (room to flare), then its speed is raised, a third at most. The F-16C came down 8.2 deg nose up, its tail touching at 10.3, and touched down at 5 m/s. All its flaps out at its clean stall's 1.3 brought the B-52H down 11.5 deg nose down onto its front gear;
+  - down the slope its flaps and speed stay as set, but its flaps go out, never back, while it runs 8 % fast (their drag: the C-130J, its flight idle's thrust about its drag, gained 13 m/s down it), and its speed is raised, never lowered, while it comes down over that attitude still. Changed both ways on the slope, they hunted: the E-7A and the Mirage 2000 porpoised.
+- **Its flare,** at the attitude level: once the glide slope's sink is more than its height over 4 s (no less than 0.6 m/s), its pitch is raised from where it was on the sink's error (1.5 deg per m/s, an integral of 0.6), no more than 8 deg and 2 deg short of its tail's touching. Its heading is the route's, its crab held; its airspeed is held at 0.9 of its approach speed, its throttle back. Flared by its velocity loop, the F-16C pitched from 8 to 10 deg too late and touched down at 4.2 m/s.
+- **Its rollout,** from its first contact: a rejected takeoff's stop (4.50), FA's own, on the runway's line from its threshold - idle, steered onto the centre line, its wings level. Its nose comes down from where it touched down at 2 deg/s, its brakes on once it is down: the B-52H rests on its bicycle gear 1 deg nose up. Its flaps come up, its lift dumped onto its wheels: with them out, at its touchdown speed, the C-130J and the B-52H flew off again 35 m. Stopped, the recovery completes.
+- **Canceled by its policy** in its rollout, FA's own stop takes the rest, as a rejected takeoff's (4.50).
+- **A rotorcraft** flies a route to its centre line, 60 s of its cruise out (30 m to 1 km) and 10 s up (100 m at most), then to a hover 2 s of its cruise up (1.5 to 10 m) 60 m beyond the threshold, where it stops; then straight down over that spot at 0.7 m/s at the position level. On the ground for a second, its collective goes down; for another, it completes. A kilometre out and 100 m up, the Crazyflie's battery ran out on the way.
+- **A behaviour's support effectors above the actuators** (`Behavior::configures`, `configure`): a behaviour whose activity owns the gear, flaps or brakes, flying above the actuators, sets them on the actuator command its levels below made. The recovery's gear and flaps go out so while its route flies the velocity level. A behaviour that does not configure is flown as before. The flag sits in the control stack's padding after `limited_`: after `started_`, it moved the stack's command arrays 8 bytes on, and a level switch's NEW ran 8 to 10 % slower.
+- **What it does not do yet:** a go-around or a wave-off, a missed approach, a crosswind limit (FA-10b); drag devices and the configuration commands (FA-10c); a route that ends in a landing, and a taxi after it (FA-10d).
+- **The support table:** `fsim.guidance.recovery` is supported on every aircraft; `/runway` on every wing (not implemented on a rotorcraft); `/vertical` on every rotorcraft (rule R1). `/go_around`, `/missed_approach` and `/configuration` are FA-10's, not implemented.
+- **Surfaces.** C++: the "recovery" behaviour, `RecoveryBehavior` (fsim/GuidanceModes.h), `CapabilityHost::prepareRecovery` and `landingLine` (Recovery.cpp), `LaunchBehavior::startRollout`, `Behavior::configures` and `configure`, `RouteGround::elevationM`. No C ABI change: a behaviour goes by its id. Python: `Vehicle.submit_behavior("recovery", airfield=, runway=)`; fsim.agra maps its mode to RECOVERY.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1728,6 +1752,12 @@ RECOVERY at airfields for every family, go-around, missed approach, CleanUp and 
 **Supporting models:** Drag devices (SUB-04).
 
 **Items (8):** RCV-01, RCV-02, RCV-03, RCV-04, RCV-08; CAP-02; STS-16; SUB-04.
+
+**Status:** in four steps:
+- FA-10a, the recovery to a runway: a wing's approach, glide slope, flare, touchdown and rollout; a rotorcraft's approach to a hover and vertical landing (RCV-01, RCV-04; CAP-02; 4.53), done 2026-09-30 and measured in section 14;
+- FA-10b, the go-around and the automatic wave-off, the missed approach, and each type's published crosswind limit (RCV-02, RCV-03);
+- FA-10c, drag devices where rule R8 applies, the speedbrake, CleanUp and DirtyUp (SUB-04, STS-16, RCV-08): the B-52H's airbrakes among them;
+- FA-10d, a route that ends in a landing - its approach's and touchdown points, FA's own plan's landing path - and a taxi after it.
 
 **Accepted when:**
 
@@ -3573,6 +3603,35 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - A behaviour's NEW reads slower. It first read +14 to +16 %: the route's prepared start on the ground (`ground_`), read at every NEW, sat at the host's far end, a cold line (FA-7a's lesson). It is now a flag in the hole beside `policyNew_`, and the NEW read +8 to +12 %. With the steps' allocations taken out it read +22 to +24 % (+21 % from three copies), though nothing on its path changed: only code elsewhere in the benchmark and the library.
   - That is placement. Restoring FA-9c's phase check exactly read +16 %. With every function aligned to 64 bytes, both builds made from their trees, a behaviour's NEW is +1.4 %, and 3.3 % faster from three copies. The other NEWs and updates are within −1.5 % to +0.7 %, and the micro cases within −0.9 % to +0.9 %.
 - ctest: all 389 tests pass.
+
+**FA-10a, the recovery to a runway (RCV-01, RCV-04, CAP-02).**
+- What it built is 4.53, in C++ and Python: `fsim.guidance.recovery`, and with it all ten of A-GRA's flight capability types.
+- **Flown**, every wing 1,000 m up, 15.8 km from the threshold of a 3,000 m runway north (bearing 198 deg from it), heading north (a probe, then `test_recovery`, `test_fleet` and the Python twin):
+  - **in calm air,** 29 wings touched down 194 to 683 m beyond the threshold (the Mirage 2000; the KC-135R), within 1.9 m of the centre line (the C-17A). They sank at 0.31 to 2.93 m/s (the KC-135R; the EA-18G), bounced 2.0 m at most (the RQ-4B, a glider) and stopped by 1,875 m along (the Su-25), within 1.9 m of the line;
+  - **in a 10 m/s crosswind,** crabbed 5 to 18 deg, 26 of them touched down 193 to 651 m along, within 2.3 m of the line, sinking at 0.27 to 2.71 m/s, and stopped within 18.9 m of it (the MiG-29A; the Mirage 2000 10.5 m, the Typhoon 8.6 m, the rest within 6.7 m).
+- **Not yet within the acceptance,** each with its reason:
+  - **the B-52H:** with no airbrakes modelled (FA-10c's drag devices), it cannot lose its energy. Calm, it floated 3.9 km and touched down past the runway's end, bounced 9.7 m and stopped 5.4 km along; across, it touched down 500 m along at 4 m/s and bounced 18 m;
+  - **the C-130J:** its turboprops' flight idle gives about as much thrust as its drag - a glide of 40 to 1 with its gear and flaps out - so it gains speed down the slope and comes to its flare nose low. It touched down 356 m along at 1.3 m/s and bounced 12 m (9 m across). The EC-130H, the same airframe, lands well (292 m along, 1.3 m/s). A hangar finding: a turboprop's flight idle;
+  - **the Skua in the crosswind:** 10 m/s is 60 % of its approach speed; it never came down its final. Its crosswind limit is FA-10b's, a wave-off;
+  - **the U-2S in the crosswind:** it touched down on the line and ran 37 m off it on its tail wheel, as its rejected takeoffs did (4.50, beyond the real one's limit);
+  - **the E-7A in the crosswind:** marginal. Flown alone it hopped 1 m and stopped on the line; flown after six others in the same process, its first touch bounced 6.7 m, and it ran off the runway 149 m.
+- **The rotorcraft**, each from half a kilometre out (the Crazyflie 100 m): the UH-1H, UH-60A, IRIS and Crazyflie landed on their spots within 1.4 m, sinking at 0.45 to 0.70 m/s, calm and in 5 m/s (the Crazyflie 2 m/s).
+- **The fleet's case**, all 35 at once - each wing 300 m up with its runway's threshold 20 km ahead, each rotorcraft hovering 30 m up 20 s of its cruise short of it: every one completed, stopped. The wings but the B-52H and the C-130J touched down in their touchdown zone below 3.2 m/s, bounced less than 3 m and kept within half a runway of the line; every rotorcraft landed within 3 m of its spot below 1 m/s.
+- **Found and fixed, each on the way** (4.53 gives each rule's reason): the approach geometry (a base leg, the fixes moved out for the descent), the speeds (from 1.6 times the stall to 1.3, raised for room to flare), the flaps (from a takeoff's, out level for the attitude, out on the slope for drag), the flare at the attitude level, the turn rate bounded at 35 deg, the rollout's derotation and its flaps up, and the rotorcraft's approach scaled by its cruise.
+- **Tried, and not kept:**
+  - **hangar measuring the stall with the flaps all out:** its trim could not fly the configuration (the C172's read 27 to 45 kt by where it began), so no design carries a landing stall;
+  - **all the flaps out from the start of the approach:** the EA-18G and the E-7A crashed, the B-52H bounced 20 m;
+  - **a pitch floor at touchdown:** the U-2S ballooned to 36 m and floated on, and the C-130J still landed nose low;
+  - **its approach's turns bounded at their own 25 deg:** the route's course trim wound up, and the RC-135W came down its final 268 m to the side of the runway.
+- **A finding beside it:** a plain route's capture of its first leg, a turn rate on its course's error, banks as steeply as the loops allow. The EA-18G at 1.6 times its least speed, turning about, banked to 81 deg and departed, a recovery or not. The recovery bounds its own turns; a route's is FA-6's to look at.
+- **The fleet** (1,751 states as flights are judged, 2,415 as cases end, against FA-9d's): every state identical to the bit but the moving-frame curve case's 32 judged and 35 ended. Those differ by 2.5 nm at most, their speeds to the last digit printed: its frame moves from the world's clock, now later by the recovery case's flights. FA-9d's case, shorter, left them alone, consistent with a binary exponent of the clock. The new case's group is aside.
+- **Unchanged, to the last bit:** the digests with protection and without, the route probe (120 lines) and the curve probe (64). The allocation gate passes, and gains the recovery: a C172's, from its first step to its stop, allocates nothing.
+- **A/B throughput** against FA-9d (78c8bd6), each build from its own directory and from three copies, in quiet windows:
+  - A level switch's NEW first read +8 to +10 %, in default and aligned builds alike: the stack's new per-slot flag, after `started_`, moved its command arrays 8 bytes on. In the padding after `limited_` it reads +0.7 to +2.0 %.
+  - A behaviour's NEW is 11 to 12 % faster, placement (FA-9d's reading +22 % undone).
+  - The micro cases are within -0.6 % to +3.3 % from three copies. The behaviours' stepping reads 0 to 3 % slower (hold, waypoints, route): the flag tested at each update. With every function aligned they are within -1.8 % to +2.2 %. Single directories read the actuator, report and default-hold cases 12 to 19 % either way, run to run.
+  - World throughput is 100.2 to 100.4 % of FA-9d's, and 99.4 to 100.6 % from three copies. Protection costs at most 0.5 %.
+- ctest: all 392 tests pass.
 
 ## Appendix A: the inventory
 

@@ -171,6 +171,8 @@ private:
     void flyMerged(const ControlContext& ctx, sim::ControlInputs& out);
     /// Nothing flies a primary axis through the cascade: the neutral actuator command.
     void flyNeutral(sim::ControlInputs& out);
+    /// Slot s's actuator command, its support effectors as its behaviour sets them (Behavior::configure; 4.53): into merged_.
+    void configured(std::size_t s, const Command*& current) noexcept;
     /// No slot owns every primary axis: the merged pass or the neutral
     /// command, then the state checked against the envelope.
     void flyGeneral(const ControlContext& ctx, sim::ControlInputs& out);
@@ -201,6 +203,9 @@ private:
     double tasPerCas_ = 1.0, tasPerMach_ = 0.0, bankCos_ = 1.0;    ///< what they need from the state (Limit): a LimitState
     EnvelopeLimits geared_{};                                      ///< they, with the gear's speed, when it is down
     std::uint16_t limited_ = 0;                                    ///< what the merged pass's protection stage limited
+    /// Per slot, its behaviour sets its support effectors (Behavior::configures). In the hole after limited_: placed after
+    /// started_, it moved the command arrays 8 bytes on, and a level switch's NEW ran 8 to 10 % slower.
+    std::array<bool, kSlotCount> configures_{};
     // The vehicle default's hold (VehicleDefault::Hold): what the axes nobody
     // owns fly, captured from the state as each was let go.
     Command hold_ = VelocityCommand{};

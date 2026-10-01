@@ -929,6 +929,11 @@ private:
     /// A wing's rotation and climb speeds and rotation attitude into `out` (4.49; Launch.cpp): false where it has no speed to
     /// rotate at (a stock model's).
     bool takeoffSpeeds(RouteGround& out) const noexcept;
+    /// An airfield's runway's landing line into `out` (4.53; Recovery.cpp): its threshold, course, length and elevation.
+    Reason landingLine(double airfield, double runway, RouteGround& out, CommandResult& detail) const;
+    /// A recovery's NEW (4.53; Recovery.cpp): its runway resolved, its approach laid out as a route (laidRoute_), the parameters
+    /// its behaviour flies by written ("_...").
+    Reason prepareRecovery(BehaviorCommand& recovery, const sim::VehicleState& state, CheckLog& log);
     /// A taxi's corner radius, tightest turn, yaw acceleration and arc speed at `speed` into `out` (4.51; Taxi.cpp).
     void taxiHandling(double speed, RouteGround& out) const noexcept;
     /// The point (0 the first) whose corner or leg a taxi from (lat0, lon0) through `n` points cannot draw with corners of
@@ -1064,6 +1069,8 @@ private:
     /// The route being prepared starts on the ground: ground_ holds its taxi and takeoff, to be written with it (4.52). In
     /// the same hole: ground_ itself, at the host's far end, read at every NEW cost a behaviour's NEW 14 to 16 % (a cold line).
     bool grounded_ = false;
+    /// The behaviour being prepared laid out a route for its activity (a recovery's approach: 4.53), written with it.
+    bool laidRoute_ = false;
     double controlPeriodS_ = 1.0 / 120.0;
     EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;

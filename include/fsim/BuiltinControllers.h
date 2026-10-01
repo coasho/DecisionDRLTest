@@ -417,6 +417,9 @@ public:
     /// A route's takeoff (4.52), as the host resolved it, climbed out at `completeAglM` (a rotorcraft's hover `hoverAglM` up) -
     /// as start() with the parameters write() gives, nothing allocated (it starts inside a step).
     void startResolved(const ControlContext& ctx, const RouteGround& resolved, double completeAglM, double hoverAglM);
+    /// A landing's rollout (4.53): on the runway's line (its threshold its start), as a rejected takeoff's stop - idle, its
+    /// brakes, steered onto the centre line, its nose down - FA's own: finished stopped. Nothing allocated.
+    void startRollout(const ControlContext& ctx, const RouteGround& line);
 
 private:
     Command roll(const ControlContext& ctx);
@@ -438,6 +441,7 @@ private:
     double lastS_ = -1.0;
     double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0, lineUpS_ = 0.0;
     bool gearUp_ = false, flapsUp_ = false;
+    bool derotating_ = false; ///< a landing's rollout: its nose being lowered, its brakes off
 };
 
 /// "taxi": A-GRA's taxi route, flown on the ground (docs/flight-autonomy.md, 4.51; WPT-26). points: where it taxies, in turn

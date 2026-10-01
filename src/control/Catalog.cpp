@@ -43,7 +43,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
     static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "launch", "taxi", "hsa", "route",
-                                          "pattern", "curve", "must_fly", "marshall", "intercept"};
+                                          "pattern", "curve", "must_fly", "marshall", "intercept", "recovery"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;

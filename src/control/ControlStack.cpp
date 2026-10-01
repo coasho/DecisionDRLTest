@@ -96,6 +96,7 @@ void ControlStack::install(std::size_t slot, std::unique_ptr<Behavior> behavior)
     if (slot >= kSlotCount) return;
     behaviors_[slot] = std::move(behavior);
     started_[slot] = 0;
+    configures_[slot] = false;
 }
 
 void ControlStack::command(const Command& command) {
@@ -359,6 +360,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         if (started_[s] != slot.generation) {
             behavior->begin(guided, *current);
             started_[s] = slot.generation;
+            configures_[s] = behavior->configures();
         }
         Command next = behavior->update(guided, *current);
         if (behavior->finished()) flown.events |= kFinished;
@@ -402,6 +404,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         level = nextLevel;
         current = derived_[n];
     }
+    if (configures_[s] && slot.level == Level::Behavior) configured(s, current); // (its own effectors: 4.53)
     if constexpr (Protected) {
         // An elevator commanded as such: the feedback limiter on a surface-controlled aircraft.
         if (limiting && slot.level == Level::Actuator) {
@@ -419,6 +422,21 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
     } else {
         actuate(std::get<ActuatorCommand>(*current), out);
     }
+}
+
+void ControlStack::configured(std::size_t s, const Command*& current) noexcept {
+    // the actuator command its levels made, its support effectors as the behaviour sets them - those its activity owns
+    const RuntimeConfig& c = *config_;
+    Command& entry = merged_[static_cast<std::size_t>(Level::Actuator)];
+    entry = std::get<ActuatorCommand>(*current);
+    auto& a = std::get<ActuatorCommand>(entry);
+    ActuatorCommand set = a;
+    behaviors_[s]->configure(set);
+    if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Flaps)]) == s) a.flaps = set.flaps;
+    if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Gear)]) == s) a.gearDown = set.gearDown;
+    if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Brakes)]) == s) a.brakeLeft = set.brakeLeft, a.brakeRight = set.brakeRight;
+    derived_[static_cast<std::size_t>(Level::Actuator)] = &entry;
+    current = &entry;
 }
 
 void ControlStack::flyNeutral(sim::ControlInputs& out) {
@@ -540,6 +558,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         if (started_[s] != slot.generation) {
             behavior->begin(guided, slot.command);
             started_[s] = slot.generation;
+            configures_[s] = behavior->configures();
         }
         Command next = behavior->update(guided, slot.command);
         SlotReport& flown = report.slots[s];
@@ -618,6 +637,14 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
     if (const auto* x = chainOf(Axis::Flaps)) final.flaps = x->flaps;
     if (const auto* x = chainOf(Axis::Gear)) final.gearDown = x->gearDown;
     if (const auto* x = chainOf(Axis::Brakes)) final.brakeLeft = x->brakeLeft, final.brakeRight = x->brakeRight;
+    for (std::size_t o = 0; o < kSlotCount; ++o) // (a behaviour above the actuators sets the effectors its activity owns: 4.53)
+        if (configures_[o] && c.slots[o].level == Level::Behavior && behaviors_[o]) {
+            ActuatorCommand set = final;
+            behaviors_[o]->configure(set);
+            if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Flaps)]) == o) final.flaps = set.flaps;
+            if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Gear)]) == o) final.gearDown = set.gearDown;
+            if (static_cast<std::size_t>(c.owner[static_cast<std::size_t>(Axis::Brakes)]) == o) final.brakeLeft = set.brakeLeft, final.brakeRight = set.brakeRight;
+        }
     // An elevator commanded as such: the feedback limiter on a surface-controlled
     // aircraft. (Through the loops, their setpoints were limited above: a second
     // limiter after them would only fight their integrators.)
