@@ -1562,6 +1562,21 @@ The stages run one at a time. Each is committed and checked before the next, as 
 | FA-16 | Faults and contingencies | L | 16 | Faults, navigation solution (SUB-09, SUB-10) | identical |
 | FA-17 | Extension: the VI volume's discretized curve | M | 1 | - | identical |
 
+### The active backlog
+
+Findings the stages have measured and not yet fixed. Each has a step that owns it and is accepted only when the step is: it is closed there, fixed and measured in section 14, or shown to be the model's and named there with its evidence. None is left behind because it lies outside the step that found it.
+
+| Item | Finding (where measured) | Owned by | Closed when |
+| --- | --- | --- | --- |
+| B-1 | **The C-130J's flight idle.** Its turboprops' flight idle gives about as much thrust as its drag, a glide of 40 to 1 with its gear and flaps out; down a 3 deg slope it gains 13 m/s, flares nose low and bounces 12 m (9 m across). The EC-130H, the same airframe, lands well (FA-10a). A hangar model's: its flight idle's thrust, its propellers' drag at flight idle. | FA-10c, with the drag devices | it lands in its touchdown zone below 3.2 m/s and bounces under 3 m, calm and across; the EC-130H's landings and every other turboprop's flights measured |
+| B-2 | **A route's turn at low speed banks without a bound.** Its capture of a leg is a turn rate on its course's error; nothing bounds the bank but the loops' own limit. The EA-18G at 1.6 times its least speed, turning about, banked 81 deg and departed (FA-10a). The recovery bounds its own turns at 35 deg; a plain route does not. | FA-10b, first: its go-around and missed approach climb and turn at low speed | no route turn banks beyond its planned bank and a stall margin at its speed; the EA-18G turns about at 1.6 times its least speed without departing; the recovery's own bound removed if it is no longer needed; the route and curve probes and the fleet's changes named and measured |
+| B-3 | **The E-7A in a 10 m/s crosswind** touches down 320 m along at 1.1 m/s, crabbed 7 deg, at 80 m/s, bounces 6.7 m and runs off the runway 149 m. It does so in every run, alone or after others, traced or not (FA-10a; section 14's first reading, a 1 m hop alone, was an older build's). | FA-10b: a balked landing, and its crosswind handling | it lands within the acceptance across, or a bounce beyond the limit goes around and the policy is told |
+| B-4 | **The U-2S and the Skua across.** The U-2S lands on the line and runs 37 m off it on its tail wheel; its rejected takeoffs run 24 and 69 m off, its taxi 2.55 m (FA-9b, FA-9c, FA-10a). 10 m/s is 60 % of the Skua's approach speed; it never comes down its final (FA-10a). Both are flown beyond what their types are flown in. | FA-10b: each type's published crosswind limit, applied to its launch and taxi too | below its limit each lands, takes off and taxis within the acceptance; above it, a recovery waves off and a launch or taxi is refused, each with its reason |
+| B-5 | **The U-2S's short-leg taxi** is 3.12 m off its path, against the 2 m accepted (FA-9c). | FA-10d: the taxi after a landing | within 2 m, or its gear's geometry named as the cause |
+| B-6 | **The builtin attitude loops' rudder** (`rudder.beta_gain`, +1 per radian of sideslip) looks opposite to the sign measured: a positive rudder command yaws the nose left, so FA-9a's climb flies `rudder = -2 beta` (FA-9a). | FA-10b: the decrab before touchdown uses the rudder | the sign measured on every family; fixed, or shown right, the digests' changes named |
+| B-7 | **The placards are inert:** no hangar design records its gear or flap speeds (FA-1c). | FA-10c: CleanUp and DirtyUp configure by them | every design records them from a published source, or names why it cannot; DirtyUp refused above them |
+| B-8 | **Carried findings** with no stage of their own: a loop given up at its top levels out and loses more speed than pulling through (the Gripen 48.6 to 38.0 m/s, FA-3d); FA-1d's waypoint check costs 5.3 % per call; a reused slot of the stock AH-1S flies 8 um to 0.1 mm from a fresh one over 6.7 s, its cause not found, and JSBSim's FGTurboProp has no reset of its own (the stock PC-7's drift was its propeller's, fixed; the reset's determinism); hangar's post-stall strips have two branches past 55 deg of angle of attack with sideslip (its table-smoothness warning on every fighter). | FA-10e, after FA-10d | each fixed and measured, or closed in section 14 with its evidence and the reason it stays |
+
 ### FA-1: Discovery that tells the truth; platform behaviours fixed (M)
 
 Stop advertising what does not work, at once (D4); tell physically unsupported, temporarily unavailable and not implemented apart (D5); per-aircraft evidence for every exception (D6); fix the platform's behaviours (D3). Flight phases gate the guidance modes on the ground.
@@ -1753,11 +1768,12 @@ RECOVERY at airfields for every family, go-around, missed approach, CleanUp and 
 
 **Items (8):** RCV-01, RCV-02, RCV-03, RCV-04, RCV-08; CAP-02; STS-16; SUB-04.
 
-**Status:** in four steps:
+**Status:** in five steps:
 - FA-10a, the recovery to a runway: a wing's approach, glide slope, flare, touchdown and rollout; a rotorcraft's approach to a hover and vertical landing (RCV-01, RCV-04; CAP-02; 4.53), done 2026-09-30 and measured in section 14;
-- FA-10b, the go-around and the automatic wave-off, the missed approach, and each type's published crosswind limit (RCV-02, RCV-03);
-- FA-10c, drag devices where rule R8 applies, the speedbrake, CleanUp and DirtyUp (SUB-04, STS-16, RCV-08): the B-52H's airbrakes among them;
-- FA-10d, a route that ends in a landing - its approach's and touchdown points, FA's own plan's landing path - and a taxi after it.
+- FA-10b, the go-around and the automatic wave-off, the missed approach, and each type's published crosswind limit (RCV-02, RCV-03); with them the backlog's B-2 (first), B-3, B-4 and B-6;
+- FA-10c, drag devices where rule R8 applies, the speedbrake, CleanUp and DirtyUp (SUB-04, STS-16, RCV-08): the B-52H's airbrakes among them; with them B-1 and B-7;
+- FA-10d, a route that ends in a landing - its approach's and touchdown points, FA's own plan's landing path - and a taxi after it; with it B-5;
+- FA-10e, the carried findings (B-8).
 
 **Accepted when:**
 
@@ -3614,7 +3630,7 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - **the C-130J:** its turboprops' flight idle gives about as much thrust as its drag - a glide of 40 to 1 with its gear and flaps out - so it gains speed down the slope and comes to its flare nose low. It touched down 356 m along at 1.3 m/s and bounced 12 m (9 m across). The EC-130H, the same airframe, lands well (292 m along, 1.3 m/s). A hangar finding: a turboprop's flight idle;
   - **the Skua in the crosswind:** 10 m/s is 60 % of its approach speed; it never came down its final. Its crosswind limit is FA-10b's, a wave-off;
   - **the U-2S in the crosswind:** it touched down on the line and ran 37 m off it on its tail wheel, as its rejected takeoffs did (4.50, beyond the real one's limit);
-  - **the E-7A in the crosswind:** marginal. Flown alone it hopped 1 m and stopped on the line; flown after six others in the same process, its first touch bounced 6.7 m, and it ran off the runway 149 m.
+  - **the E-7A in the crosswind:** its first touch, 320 m along at 1.1 m/s and crabbed 7 deg, bounced 6.7 m, and it ran off the runway 149 m. It does so in every run, alone or after others, traced or not: a reading of 1 m flown alone was an older build's (the backlog's B-3).
 - **The rotorcraft**, each from half a kilometre out (the Crazyflie 100 m): the UH-1H, UH-60A, IRIS and Crazyflie landed on their spots within 1.4 m, sinking at 0.45 to 0.70 m/s, calm and in 5 m/s (the Crazyflie 2 m/s).
 - **The fleet's case**, all 35 at once - each wing 300 m up with its runway's threshold 20 km ahead, each rotorcraft hovering 30 m up 20 s of its cruise short of it: every one completed, stopped. The wings but the B-52H and the C-130J touched down in their touchdown zone below 3.2 m/s, bounced less than 3 m and kept within half a runway of the line; every rotorcraft landed within 3 m of its spot below 1 m/s.
 - **Found and fixed, each on the way** (4.53 gives each rule's reason): the approach geometry (a base leg, the fixes moved out for the descent), the speeds (from 1.6 times the stall to 1.3, raised for room to flare), the flaps (from a takeoff's, out level for the attitude, out on the slope for drag), the flare at the attitude level, the turn rate bounded at 35 deg, the rollout's derotation and its flaps up, and the rotorcraft's approach scaled by its cruise.
@@ -3623,7 +3639,7 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - **all the flaps out from the start of the approach:** the EA-18G and the E-7A crashed, the B-52H bounced 20 m;
   - **a pitch floor at touchdown:** the U-2S ballooned to 36 m and floated on, and the C-130J still landed nose low;
   - **its approach's turns bounded at their own 25 deg:** the route's course trim wound up, and the RC-135W came down its final 268 m to the side of the runway.
-- **A finding beside it:** a plain route's capture of its first leg, a turn rate on its course's error, banks as steeply as the loops allow. The EA-18G at 1.6 times its least speed, turning about, banked to 81 deg and departed, a recovery or not. The recovery bounds its own turns; a route's is FA-6's to look at.
+- **A finding beside it:** a plain route's capture of its first leg, a turn rate on its course's error, banks as steeply as the loops allow. The EA-18G at 1.6 times its least speed, turning about, banked to 81 deg and departed, a recovery or not. The recovery bounds its own turns; a route's is the backlog's B-2, FA-10b's first.
 - **The fleet** (1,751 states as flights are judged, 2,415 as cases end, against FA-9d's): every state identical to the bit but the moving-frame curve case's 32 judged and 35 ended. Those differ by 2.5 nm at most, their speeds to the last digit printed: its frame moves from the world's clock, now later by the recovery case's flights. FA-9d's case, shorter, left them alone, consistent with a binary exponent of the clock. The new case's group is aside.
 - **Unchanged, to the last bit:** the digests with protection and without, the route probe (120 lines) and the curve probe (64). The allocation gate passes, and gains the recovery: a C172's, from its first step to its stop, allocates nothing.
 - **A/B throughput** against FA-9d (78c8bd6), each build from its own directory and from three copies, in quiet windows:
