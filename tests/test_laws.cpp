@@ -92,7 +92,10 @@ TEST_CASE("each loop's poles go where the plant's lag asks", "[laws]") {
     CHECK(q.at("pid_attitude roll.kd") == 0.0);
     CHECK(q.at("pseudo_attitude roll.kd") == 0.0);
     CHECK(std::abs(q.at("pseudo_attitude roll.gain") - 2.5 * (1.0 - 0.05 * 2.5)) < 1e-12);
-    CHECK(designLaws(quick).size() == 64);
+    CHECK(designLaws(quick).size() == 66);
+    // the pitch's poles placed again where its lag is longer (docs/flight-autonomy.md, 4.60): the lag they are placed on
+    CHECK(fbw.at("pseudo_attitude pitch.lag_s") == tq);
+    CHECK(fbw.at("pseudo_attitude schedule.eas_ms") == fbw.at("pid_attitude schedule.eas_ms"));
 }
 
 TEST_CASE("a law and surfaces are designed each as it answers", "[laws]") {
@@ -159,7 +162,7 @@ TEST_CASE("an aircraft flies the loops designed from its plant; gains it or a tr
     REQUIRE(viper != 0);
     const VehicleProfile& p = *w.profile(viper);
     CHECK(p.control.header.provenance == Provenance::Derived); // hangar wrote its plant, not gains
-    CHECK(p.control.settings.size() == 64);
+    CHECK(p.control.settings.size() == 66);
     const Controller* attitude = w.controls(viper)->controller(Level::Attitude);
     const Controller* allocation = w.controls(viper)->controller(Level::Acceleration);
     REQUIRE(attitude != nullptr);

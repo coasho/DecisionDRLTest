@@ -147,6 +147,34 @@ TEST_CASE("the loop over pseudo-controls asks for damped rates and a load factor
     CHECK(loop.pitch.integral == 0.0);
 }
 
+TEST_CASE("the pitch's poles are placed again where the load factor lags longer", "[control]") {
+    // docs/flight-autonomy.md, 4.60: placed on the load factor's lag at the schedule's reference, its proportional and
+    // integral gains grow with the lag slower than that - as tas / eas^2 - and its damping is placed on it (zeta 0.8)
+    PseudoAttitudeLoop loop;
+    loop.pitch.kp = 0.5, loop.pitch.ki = 0.1, loop.pitch.kd = 0.2;
+    loop.pitchLagS = 0.7, loop.schedule.tasMs = loop.schedule.easMs = 150.0;
+    sim::VehicleState s = levelFlight(150.0);
+    s.airspeedCalibratedMs = 150.0, s.angularRateBodyRadS[1] = 0.02;
+    Rng rng{1};
+    ControlContext ctx{7, s, s, 0.01, nullptr, &rng};
+    auto q = [&](double tas) {
+        loop.reset();
+        s.airspeedTrueMs = s.airspeedCalibratedMs = s.velocityBodyMs[0] = s.velocityNedMs[0] = tas;
+        return (std::get<AccelerationCommand>(loop.update(ctx, AttitudeCommand{0.0, 0.05})).loadFactorG - 1.0) * 9.80665 / tas;
+    };
+    const double e = 0.05, rate = 0.02, plain = 0.5 * e + 0.1 * e * 0.01 - 0.2 * rate;
+    // at the reference and faster: the gains as placed
+    CHECK(std::abs(q(150.0) - plain) < 1e-12);
+    CHECK(std::abs(q(200.0) - plain) < 1e-12);
+    // at 100 m/s the lag is 1.5 times as long: the gains 1.5 times, the damping placed on it
+    const double lag = 1.5, w = std::sqrt(0.5 / 0.7), kd = 1.6 * w * 0.7 * lag - 1.0;
+    REQUIRE(kd > lag * 0.2);
+    CHECK(std::abs(q(100.0) - (lag * 0.5 * e + lag * 0.1 * e * 0.01 - kd * rate)) < 1e-12);
+    // with no lag given, as placed at every speed
+    loop.pitchLagS = 0.0;
+    CHECK(std::abs(q(100.0) - plain) < 1e-12);
+}
+
 TEST_CASE("registry has the built-ins and accepts user controllers", "[control]") {
     auto& r = ControllerRegistry::instance();
     for (const char* id : {"actuator", "pid_attitude", "pid_acceleration", "pid_velocity", "pid_position"}) REQUIRE(r.create(id) != nullptr);

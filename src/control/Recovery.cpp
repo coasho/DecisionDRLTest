@@ -37,7 +37,10 @@ constexpr double kFlapsPerS = 0.05;           // its flaps put out so fast, leve
                                               // come down it at - and held down it: changed on it, they hunted (the E-7A porpoised)
 constexpr double kSettledShare = 0.05;        // ...once within this share of its approach speed
 constexpr double kFastShare = 1.08;           // down the slope faster than this times its approach speed: its flaps out for their drag
-constexpr double kFlareS = 4.0;               // the flare: a sink of the height over this, no less than kFlareSinkMs
+// the flare: a sink of the height over this, no less than kFlareSinkMs. Its time is the aircraft's to answer in: at its approach
+// speed a wing's load factor lags 1.6 to 3 times what it does at its reference - the fighters' 1.3 to 2.2 s - and over 4 s
+// they flared late, onto their tails' limit, and touched down at up to 3.55 m/s (4.60)
+constexpr double kFlareS = 5.0;
 constexpr double kFlareSinkMs = 0.6;
 constexpr double kFlareKp = 1.5 * kDeg, kFlareKi = 0.6 * kDeg; // its pitch on the sink's error: per m/s, and per m/s a second
 constexpr double kFlareMostRad = 8.0 * kDeg;  // its pitch raised no more than this, nor to 2 deg short of its tail's touching

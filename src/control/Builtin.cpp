@@ -140,9 +140,11 @@ PseudoAttitudeLoop::PseudoAttitudeLoop() {
     params_.add("pitch.kp", &pitch.kp); params_.add("pitch.ki", &pitch.ki); params_.add("pitch.kd", &pitch.kd);
     params_.add("pitch.integral_limit", &pitch.integralLimit);
     params_.add("pitch.max_rate", &pitch.outMax);
+    params_.add("pitch.lag_s", &pitchLagS);
     params_.add("airspeed.kp", &airspeed.kp); params_.add("airspeed.ki", &airspeed.ki);
     params_.add("airspeed.integral_limit", &airspeed.integralLimit);
     params_.add("schedule.tas_ms", &schedule.tasMs);
+    params_.add("schedule.eas_ms", &schedule.easMs);
 }
 
 Command PseudoAttitudeLoop::update(const ControlContext& ctx, const Command& in) {
@@ -182,7 +184,21 @@ Command PseudoAttitudeLoop::update(const ControlContext& ctx, const Command& in)
         const double tas = std::max(s.airspeedTrueMs, 10.0);
         const double climb = std::clamp(-s.velocityNedMs[2] / tas, -1.0, 1.0);
         const double pitchRate = s.angularRateBodyRadS[1] * rollCos - s.angularRateBodyRadS[2] * std::sin(rollNow);
-        const double q = pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, pitchRate, ctx.dt);
+        // slower than its reference the load factor lags longer - the lift's lag grows as tas / eas^2 - and poles placed on
+        // the reference's lag ring: they are placed again on the lag here, as the laws place them (zeta 0.8, the same
+        // frequency), the proportional and integral gains growing with the lag, the damping placed on it
+        // (docs/flight-autonomy.md, 4.60). The EA-18G at 1.4 times its least speed, flown on the reference's, swung its
+        // pitch 28 deg and departed in a turn; its damping alone placed again slowed the fighters' flares
+        const double lag = pitchLagS > 0.0 ? schedule.factor(s, 2.0, -1.0) : 1.0;
+        double q;
+        if (lag > 1.0) {
+            const double w = std::sqrt(std::max(pitch.kp, 0.0) / pitchLagS);
+            const double kd = std::max(pitch.kd, 1.6 * w * pitchLagS * lag - 1.0);
+            q = std::clamp(pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, pitchRate, ctx.dt, lag) - (kd - lag * pitch.kd) * pitchRate,
+                           pitch.outMin, pitch.outMax);
+        } else {
+            q = pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, pitchRate, ctx.dt);
+        }
         out.loadFactorG = (std::sqrt(1.0 - climb * climb) + tas * q / kG) / std::max(rollCos, 0.3);
     } else {
         pitch.reset();

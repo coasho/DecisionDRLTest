@@ -522,7 +522,14 @@ For fighters:
   own modes (they take the surfaces as they moved for inputs), so the
   report adds the dutch roll with the damper on. Flown in JSBSim, the
   KC-135R's sideslip after a rudder doublet decays at 0.31 with it, 0.11
-  without.
+  without. Where the airframe's weathercock stability at the CG (Cn_beta)
+  is short of 0.03 /rad - the U-2S's own, the slow long-winged design
+  nearest the RQ-4B (the others have 0.017 to 0.16) - the damper feeds the
+  sideslip back too, against
+  itself through the rudder at most half its travel: its gain over dynamic
+  pressure makes Cn_beta up to 0.03 with the rudder's yaw power, and the
+  yaw-rate gain is designed with it on (`fcs.sideslip_gain`). Only the
+  RQ-4B has one.
 - **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
   gyration are given per design (NASA's for the F-16).
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
@@ -978,8 +985,12 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   130.9 ft, on NASA's LRN 1015 section (a coordinate file beside the
   design). It flies at 10.5 t, 30 % of its fuel, on direct controls with a
   yaw damper (hangar's fly-by-wire tests are a fighter's). Its V-tail only
-  just outweighs the bulbous nose in yaw (Cn_beta 0.004, a warning), yet
-  its dutch roll is level 1, damped 0.17 by the airframe alone; set at -4
+  just outweighs the bulbous nose in yaw (Cn_beta 0.004, a warning;
+  negative below 45 m/s at the CG), yet its dutch roll is level 1, damped
+  0.17 by the airframe alone. Its yaw damper's sideslip feedback makes the
+  weathercock up: without it a turn at 60 m/s rolled in on full aileron
+  slipped 25 deg, and across 10 m/s it departed (the platform's backlog
+  B-14); with it, 15 and 19 deg on the roll-in, settled within 3 s. Set at -4
   deg, the tail trims the cambered wing to its stall, CL 1.65 at 76 KCAS.
   It climbs to 45,200 ft, not 60,000: the high-bypass lapse, flat-rated,
   leaves its AE3007H about 470 lbf there, where it needs some 700 (the

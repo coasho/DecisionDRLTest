@@ -16,7 +16,7 @@ import numpy as np
 
 from . import __version__
 from .applicability import references_xml
-from .fcs import YAW_DAMPER_WASHOUT_S
+from .fcs import SIDESLIP_FEEDBACK_CNB, YAW_DAMPER_WASHOUT_S
 from .mass import G0
 
 CHANNEL_PROPERTY = {"elevator": "fcs/elevator-pos-deg", "aileron": "fcs/left-aileron-pos-deg",
@@ -528,12 +528,42 @@ def structure_contacts(aircraft, mass_model):
     return out
 
 
+def _sideslip_feedback_xml(yd, half):
+    """The yaw damper's sideslip feedback (fcs.sideslip_gain), where it has
+    one: the sideslip times the gain over dynamic pressure, against it; half
+    the rudder's travel at most. Empty without."""
+    kb = yd.get("kb")
+    if kb is None or not np.any(np.asarray(kb) != 0.0):
+        return ""
+    rows = "\n".join("              %8.1f  %9.5f" % (q, k) for q, k in zip(yd["qbar_psf"], kb))
+    return """
+        <!-- its sideslip feedback (hangar/fcs.py sideslip_gain): the weathercock
+             stability the airframe is short of, made up to %.2f /rad -->
+        <fcs_function name="fcs/sideslip-feedback">
+          <function>
+            <product>
+              <value>-1</value>
+              <table>
+                <independentVar lookup="row">aero/qbar-psf</independentVar>
+                <tableData>
+%s
+                </tableData>
+              </table>
+              <property>aero/beta-rad</property>
+            </product>
+          </function>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </fcs_function>""" % (SIDESLIP_FEEDBACK_CNB, rows, -half, half)
+
+
 def _yaw_damper_xml(yd, lo, hi):
     """The yaw damper's part of the Yaw channel: the yaw rate washed out,
     times the gain over dynamic pressure, against it; half the rudder's
-    travel at most, the pilot's command added to it."""
+    travel at most, the pilot's command added to it - and its sideslip
+    feedback where it has one."""
     rows = "\n".join("              %8.1f  %9.5f" % (q, k) for q, k in zip(yd["qbar_psf"], yd["k"]))
     half = 0.5 * max(abs(lo), abs(hi)) * 0.0174533
+    feedback = _sideslip_feedback_xml(yd, half)
     return """        <!-- the yaw damper (hangar/fcs.py yaw_damper): the yaw rate, washed out so a
              steady turn's is left alone, against itself through the rudder - the
              dutch roll damped to %.2f at 1 g across the speed range -->
@@ -555,12 +585,13 @@ def _yaw_damper_xml(yd, lo, hi):
             </product>
           </function>
           <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
-        </fcs_function>
+        </fcs_function>%s
         <summer name="fcs/rudder-sum">
           <input>fcs/rudder-control</input>
-          <input>fcs/yaw-damper</input>
+          <input>fcs/yaw-damper</input>%s
           <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
-        </summer>""" % (yd["zeta"], 1.0 / YAW_DAMPER_WASHOUT_S, rows, -half, half, lo * 0.0174533, hi * 0.0174533)
+        </summer>""" % (yd["zeta"], 1.0 / YAW_DAMPER_WASHOUT_S, rows, -half, half, feedback,
+                         "\n          <input>fcs/sideslip-feedback</input>" if feedback else "", lo * 0.0174533, hi * 0.0174533)
 
 
 def _centre_brake_xml():

@@ -1213,7 +1213,8 @@ class Design:
         mach = V / math.sqrt(1.4 * 287.05 * (288.15 - 0.0065 * h))
         A, B = fcs.yaw_plant(tabs, self.aircraft, loaded_inertia(mm), Q, V, mach, lin["alpha_trim_deg"])
         k = float(np.interp(Q / fcs.PSF, yd["qbar_psf"], yd["k"]))
-        return {"zeta": fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, k)), "gain": k, "target": yd["zeta"]}
+        kb = float(np.interp(Q / fcs.PSF, yd["qbar_psf"], yd["kb"])) if "kb" in yd else 0.0
+        return {"zeta": fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, k, kb=kb)), "gain": k, "target": yd["zeta"]}
 
     def _max_speed_altitude(self):
         """Where the top speed is flown (m): the height it is published for

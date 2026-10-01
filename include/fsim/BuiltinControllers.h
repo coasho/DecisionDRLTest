@@ -155,8 +155,11 @@ public:
     double maxRollRateRadS = 1.5;  ///< "roll.max_rate": the bank setpoint's slew
     double headingGain = 1.5;      ///< "heading.gain": rad of bank per rad of heading error (at the reference speed)
     Pid pitch{1.0, 0.1, 0.0, 0.1, -0.35, 0.35};   ///< "pitch.*": the pitch rate, rad/s, a pitch error asks (kd on the pitch's rate)
+    /// "pitch.lag_s": the load factor's lag at the schedule's reference (the allocation's, as identified), the pitch's
+    /// poles placed on it; slower, where the lag is longer, they are placed again on the lag there (0: as given)
+    double pitchLagS = 0.0;
     Pid airspeed{0.2, 0.01, 0.0, 2.0, -5.0, 5.0}; ///< "airspeed.*": the acceleration, m/s2, an airspeed error asks
-    AirspeedSchedule schedule;     ///< "schedule.tas_ms": the heading gain grows with the speed
+    AirspeedSchedule schedule;     ///< "schedule.tas_ms", "schedule.eas_ms": the heading gain grows with the speed
 
 private:
     Parameters params_;

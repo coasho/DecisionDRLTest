@@ -153,6 +153,11 @@ def vectoring(aircraft, inertia=None):
 YAW_DAMPER_ZETA = 0.3      # the dutch roll damping a direct-control aircraft's yaw damper aims for
 YAW_DAMPER_WASHOUT_S = 2.0  # its washout: a steady turn's yaw rate left alone
 YAW_DAMPER_ALTITUDE = 3000.0  # m: where each dynamic pressure's Mach number is taken
+# the weathercock stability (Cn_beta at the CG, /rad) a yaw damper's sideslip feedback makes an airframe's up to: the
+# U-2S's own, the slow long-winged design nearest the RQ-4B (the conventional designs here have 0.017, the Su-25's, to
+# 0.16). Of those with a yaw damper only the RQ-4B's V-tail falls short - 0.005 at 65 m/s, negative below 45 - where its
+# flight controls make it up (docs/hangar.md)
+SIDESLIP_FEEDBACK_CNB = 0.03
 
 
 def yaw_plant(tabs, aircraft, inertia, Q, V, mach, alpha_deg):
@@ -174,13 +179,14 @@ def yaw_plant(tabs, aircraft, inertia, Q, V, mach, alpha_deg):
     return A, np.array([cy * Q * S / (m * V), (L + Ixz / Ixx * N) / den, (N + Ixz / Izz * L) / den, 0.0])
 
 
-def yaw_damper_loop(A, B, k, tau=YAW_DAMPER_WASHOUT_S):
+def yaw_damper_loop(A, B, k, tau=YAW_DAMPER_WASHOUT_S, kb=0.0):
     """The lateral model with the yaw damper on: the rudder at -k times the
     yaw rate washed out over tau (r - z, z' = (r - z) / tau: a fifth
-    state), as the JSBSim file's washout_filter has it."""
+    state), as the JSBSim file's washout_filter has it - and at -kb times
+    the sideslip where it feeds that back (sideslip_gain)."""
     n = len(A)
     M = np.zeros((n + 1, n + 1))
-    M[:n, :n] = A - k * np.outer(B, np.eye(n)[2])
+    M[:n, :n] = A - k * np.outer(B, np.eye(n)[2]) - kb * np.outer(B, np.eye(n)[0])
     M[:n, n] = k * B
     M[n, 2], M[n, n] = 1.0 / tau, -1.0 / tau
     return M
@@ -212,6 +218,21 @@ def _damper_gain(A, B, zeta, limit):
     return s * hi
 
 
+def sideslip_gain(tabs, aircraft, inertia, mach, alpha_deg):
+    """The sideslip feedback (rudder rad per rad of sideslip, against it) that
+    makes the airframe's weathercock stability at the CG up to
+    SIDESLIP_FEEDBACK_CNB with the rudder's yaw power: (target - Cn_beta) /
+    -Cn_rudder, both moved to the CG as yaw_plant moves them; 0 where it has
+    that of its own, at most LIMITS["k_yaw_beta"]."""
+    d = derivatives_at(tabs, alpha_deg, mach)
+    dx = inertia[1][0] - aircraft.aero_point[0]
+    cnb = d["Cnb"] + d["CYb"] * dx / aircraft.b
+    power = -(d.get("Cn_rudder", 0.0) + d.get("CY_rudder", 0.0) * dx / aircraft.b)
+    if cnb >= SIDESLIP_FEEDBACK_CNB or abs(power) < 1e-6:
+        return 0.0
+    return float(np.clip((SIDESLIP_FEEDBACK_CNB - cnb) / power, -LIMITS["k_yaw_beta"], LIMITS["k_yaw_beta"]))
+
+
 def yaw_damper(tabs, aircraft, mass_model):
     """A direct-control aircraft's yaw damper ([flight_control] type =
     "direct", yaw_damper = true), or None: the gain (rudder rad per rad/s of
@@ -221,7 +242,9 @@ def yaw_damper(tabs, aircraft, mass_model):
     effect rolls the aircraft through its dutch roll, which a model of
     sideslip and yaw alone leaves out. A large swept-wing jet's dutch roll
     is lightly damped by nature, most at height (the real B-52's and
-    KC-135's have dampers)."""
+    KC-135's have dampers). Where the airframe's weathercock stability is
+    short of SIDESLIP_FEEDBACK_CNB the damper feeds the sideslip back too
+    ("kb", sideslip_gain), and is designed with it on."""
     spec = aircraft.spec.get("flight_control", {})
     if spec.get("type", "direct") != "direct" or not spec.get("yaw_damper", False):
         return None
@@ -232,15 +255,17 @@ def yaw_damper(tabs, aircraft, mass_model):
     zeta = float(spec.get("yaw_damper_zeta", YAW_DAMPER_ZETA))
     rho = 1.225 * (1.0 - 2.25577e-5 * YAW_DAMPER_ALTITUDE) ** 4.2559
     top = float(tabs["mach"]["mach"][-1]) if tabs.get("mach") is not None else 0.9
-    gains = []
+    gains, sideslip = [], []
     for q_psf in QBAR_PSF:
         Q = q_psf * PSF
         V = math.sqrt(2.0 * Q / rho)
         mach = min(V / (A_SOUND + 8.6), top)
         alpha = min(_trim_alpha(tabs, m * G0 / (Q * S), mach), 15.0)
         A, B = yaw_plant(tabs, aircraft, inertia, Q, V, mach, alpha)
-        gains.append(_damper_gain(A, B, zeta, LIMITS["k_yaw_r"]))
-    return {"qbar_psf": np.array(QBAR_PSF), "k": np.array(gains), "zeta": zeta}
+        kb = sideslip_gain(tabs, aircraft, inertia, mach, alpha)
+        sideslip.append(kb)
+        gains.append(_damper_gain(A - kb * np.outer(B, np.eye(len(A))[0]), B, zeta, LIMITS["k_yaw_r"]))
+    return {"qbar_psf": np.array(QBAR_PSF), "k": np.array(gains), "kb": np.array(sideslip), "zeta": zeta}
 
 
 def _mach_factor(mt, key, mach):

@@ -1120,6 +1120,74 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(float(damper.find("clipto/min").text), -half, places=5)
         summed = root.find(".//summer[@name='fcs/rudder-sum']")
         self.assertEqual([i.text for i in summed.findall("input")], ["fcs/rudder-control", "fcs/yaw-damper"])
+        self.assertIsNone(root.find(".//fcs_function[@name='fcs/sideslip-feedback']"))
+
+    def test_yaw_damper_makes_up_the_weathercock(self):
+        # where the airframe's weathercock stability at the CG is short of
+        # SIDESLIP_FEEDBACK_CNB the damper feeds the sideslip back through the
+        # rudder - against it, the rudder's yaw power making the difference up
+        # exactly - and its yaw-rate gain is designed with that on; with
+        # enough of its own it feeds none back (the B-14 RQ-4B)
+        from unittest import mock
+        from hangar import fcs
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        a.spec.setdefault("flight_control", {})["yaw_damper"] = True
+        a = Aircraft(a.spec)
+        mm = MassModel(a)
+        inertia = loaded_inertia(mm)
+        dx = inertia[1][0] - a.aero_point[0]
+        rho = 1.225 * (1.0 - 2.25577e-5 * fcs.YAW_DAMPER_ALTITUDE) ** 4.2559
+        for cnb, fed in ((0.004, True), (0.08, False)):
+            d = {"CYb": -0.6, "CYp": 0.0, "CYr": 0.3, "Clb": -0.1, "Clp": -0.45, "Clr": 0.12, "Cnb": cnb, "Cnp": -0.03,
+                 "Cnr": -0.1, "CY_rudder": 0.15, "Cl_rudder": 0.01, "Cn_rudder": -0.03}
+            with mock.patch.object(fcs, "derivatives_at", return_value=d), \
+                    mock.patch.object(fcs, "_trim_alpha", return_value=4.0):
+                yd = fcs.yaw_damper({}, a, mm)
+                with self.subTest(Cnb=cnb):
+                    if not fed:
+                        self.assertTrue((yd["kb"] == 0.0).all())
+                        continue
+                    cnb_cg = cnb + d["CYb"] * dx / a.b
+                    power = -(d["Cn_rudder"] + d["CY_rudder"] * dx / a.b)
+                    for q_psf, kb, k in zip(yd["qbar_psf"], yd["kb"], yd["k"]):
+                        self.assertGreater(kb, 0.0)
+                        self.assertAlmostEqual(cnb_cg + kb * power, fcs.SIDESLIP_FEEDBACK_CNB, places=12)
+                        # its yaw-rate gain is the one designed with the feedback on
+                        Q = q_psf * fcs.PSF
+                        A, B = fcs.yaw_plant(None, a, inertia, Q, math.sqrt(2.0 * Q / rho), 0.3, 4.0)
+                        fed_on = A - kb * np.outer(B, np.eye(4)[0])
+                        self.assertEqual(k, fcs._damper_gain(fed_on, B, fcs.YAW_DAMPER_ZETA, fcs.LIMITS["k_yaw_r"]))
+
+    def test_yaw_channel_carries_the_sideslip_feedback(self):
+        # with a sideslip feedback the Yaw channel takes the sideslip times
+        # minus its gain over dynamic pressure, clipped to half the rudder,
+        # into the rudder's sum beside the damper
+        from hangar import fcs, jsbsim
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        lo, hi = a.channel_limits("rudder")
+        kb = np.linspace(1.2, 0.0, len(fcs.QBAR_PSF))
+        yd = {"qbar_psf": np.array(fcs.QBAR_PSF, float), "k": np.linspace(0.0, 0.8, len(fcs.QBAR_PSF)), "kb": kb, "zeta": 0.3}
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, yaw_damper=yd))
+        fed = root.find(".//fcs_function[@name='fcs/sideslip-feedback']")
+        product = fed.find("function/product")
+        self.assertEqual(float(product.find("value").text), -1.0)
+        self.assertEqual(product.find("property").text, "aero/beta-rad")
+        self.assertEqual(product.find("table/independentVar").text, "aero/qbar-psf")
+        rows = np.array([[float(x) for x in r.split()] for r in product.find("table/tableData").text.strip().splitlines()])
+        np.testing.assert_allclose(rows, np.column_stack([yd["qbar_psf"], kb]), atol=1e-5)
+        half = 0.5 * max(abs(lo), abs(hi)) * 0.0174533
+        self.assertAlmostEqual(float(fed.find("clipto/max").text), half, places=5)
+        self.assertAlmostEqual(float(fed.find("clipto/min").text), -half, places=5)
+        summed = root.find(".//summer[@name='fcs/rudder-sum']")
+        self.assertEqual([i.text for i in summed.findall("input")], ["fcs/rudder-control", "fcs/yaw-damper", "fcs/sideslip-feedback"])
+        # none to feed back: none written
+        yd["kb"] = np.zeros(len(fcs.QBAR_PSF))
+        self.assertIsNone(ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, yaw_damper=yd)).find(
+            ".//fcs_function[@name='fcs/sideslip-feedback']"))
+
+
 def turboprop_design():
     """A small twin with turboprops: one [[engine]], mirrored, both
     propellers turning the same way."""
