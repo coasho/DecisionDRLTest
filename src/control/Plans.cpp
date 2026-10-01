@@ -245,7 +245,8 @@ PlanCommandResult CapabilityHost::planCommand(PlanId id, PlanCommand command, co
     };
     const auto submit = [&](const CommandOptions& o) { // its route's NEW, or its validation
         const RoutePlan& k = e->kept;
-        const RouteExtras extras{k.loiters, k.states, k.paths, k.branches, k.terminators};
+        RouteExtras extras{k.loiters, k.states, k.paths, k.branches, k.terminators};
+        extras.pathMetadata = k.pathMetadata; // (a takeoff's path's airfield and runway: 4.52)
         return submitWith(Command(k.route), k.waypoints, {}, o, state, now, true, nullptr, nullptr, &extras);
     };
     if (id == 0 || command >= PlanCommand::Count) return refused(Reason::InvalidParameter);
@@ -451,7 +452,8 @@ PlanValidationResult CapabilityHost::validatePlan(const RoutePlan& plan, const P
     CommandOptions o;
     o.validateOnly = true;
     o.range = v.modifyToValidate ? RangePolicy::Clamp : RangePolicy::Reject;
-    const RouteExtras extras{plan.loiters, plan.states, plan.paths, plan.branches, plan.terminators};
+    RouteExtras extras{plan.loiters, plan.states, plan.paths, plan.branches, plan.terminators};
+    extras.pathMetadata = plan.pathMetadata; // (a takeoff's path's airfield and runway: 4.52)
     r.check = submitWith(Command(plan.route), plan.waypoints, {}, o, from, now, true, nullptr, nullptr, &extras);
     if (r.check.status == CommandStatus::Valid) {
         r.valid = true;

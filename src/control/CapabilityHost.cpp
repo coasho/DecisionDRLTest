@@ -495,6 +495,12 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         const auto type = static_cast<WaypointType>(static_cast<int>(w.waypointType));
         if (type == WaypointType::NavOnly || type == WaypointType::Passive || (type == WaypointType::EndOfPath && (p.linked ? route::endsPath(p, i) : i + 1 == count))) continue;
         if (type == WaypointType::EndOfPath) return point(i, Reason::InvalidWaypoint);
+        // a route's start on the ground (4.52): its taxi's and runway's points, as prepareGroundRoute took them; a takeoff's
+        // points are flown as points
+        if (type == WaypointType::Takeoff || type == WaypointType::TakeoffInitialPoint || type == WaypointType::TakeoffFinalPoint) continue;
+        if (grounded_ && (type == WaypointType::Taxi || type == WaypointType::RunwayStart || type == WaypointType::RunwayThreshold ||
+                                           type == WaypointType::RunwayLimit))
+            continue;
         const char* id = nullptr;
         switch (type) {
         case WaypointType::Taxi: id = "fsim.guidance.route/waypoint_type/taxi"; break;
@@ -964,6 +970,8 @@ void CapabilityHost::writeRoute() {
     store.routeStateCount = p.stateCount; // (its states placed: 4.34)
     for (std::uint32_t j = 0; j < p.stateCount; ++j) store.routeStates[j] = p.states[j], store.routeStates[j].point = p.named(p.states[j].point);
     if (p.area.laidOut() || store.mustFlyArea.laidOut()) store.mustFlyArea = p.area; // (a must fly's zone or corridor: 4.43, 4.44)
+    if (grounded_) store.routeGround = *ground_, grounded_ = false; // (its start on the ground: 4.52)
+    else store.routeGround.active = false;
     ++store.revision;
 }
 
@@ -1232,6 +1240,9 @@ ActivityRecord& CapabilityHost::start(std::size_t s, const Launch& what, const C
 Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept {
     const CapabilityDescriptor& d = catalog_->descriptor(index);
     axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
+    // a route that starts on the ground (as prepared: 4.52) owns what its taxi and takeoff set - its gear, flaps and brakes
+    if (grounded_ && !options.axes && std::holds_alternative<RouteCommand>(command))
+        axes = static_cast<AxisMask>(axes | axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes));
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
     if (d.level != Level::Actuator) axes = widenToGroups(axes, d.axisGroups);
@@ -1247,8 +1258,14 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
-    if (auto* route = std::get_if<RouteCommand>(&setpoint)) // its waypoints completed, and checked as its range policy says
-        if (const Reason why = checkRoute(*route, waypoints, state, log, extras); why != Reason::None) return why;
+    grounded_ = false;
+    if (auto* route = std::get_if<RouteCommand>(&setpoint)) { // its waypoints completed, and checked as its range policy says
+        // (one that starts on the ground: its taxi and takeoff first, its points from where it has taken off - 4.52)
+        const Reason why = startsOnGround(*route, waypoints, extras ? extras->paths : Span<const RoutePath>{})
+                               ? prepareGroundRoute(*route, waypoints, state, log, extras)
+                               : checkRoute(*route, waypoints, state, log, extras);
+        if (why != Reason::None) return why;
+    }
     if (auto* mustFly = std::get_if<MustFlyCommand>(&setpoint)) // its location laid out as a route, and checked as one (4.42)
         if (const Reason why = prepareMustFly(*mustFly, state, log, extras ? extras->area : nullptr); why != Reason::None) return why;
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) { // its segments checked as its range policy says (its shape into the scratch)
@@ -1375,7 +1392,10 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Reason why = Reason::None;
     if (w.options.range != RangePolicy::None) {
         if (const CapabilityStatus own = vehicleStatus(record.capability, state); own.availability != Availability::Available) why = own.reason;
-        else if (record.source == Source::Policy) why = phase(d, state);
+        else if (record.source == Source::Policy)
+            if ((why = phase(d, state)) == Reason::OnGround &&
+                groundStart(w.command, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()), Span<const RoutePath>(w.paths.data(), w.paths.size())))
+                why = Reason::None;
     }
     if (w.support) {
         SupportCommand setpoint = w.supportCommand;
@@ -1396,11 +1416,12 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     const bool laid = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's route written as a route's: 4.42)
     // (a mode beside the command variant: a marshall's pattern, its stack beside it; an intercept's route, its join laid afresh - 4.46, 4.47)
     const SetpointKind late = d.setpoint == SetpointKind::Marshall || d.setpoint == SetpointKind::Intercept ? d.setpoint : SetpointKind::Count;
-    const RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
+    RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
                              Span<const RoutePath>(w.paths.data(), w.paths.size()), Span<const RouteBranch>(w.branches.data(), w.branches.size()),
                              Span<const RouteTerminator>(w.terminators.data(), w.terminators.size()),
                              w.area.laidOut() ? &w.area : nullptr, late, late == SetpointKind::Marshall ? &w.marshall : nullptr,
                              late == SetpointKind::Intercept && !w.resumed ? &w.intercept : nullptr};
+    extras.pathMetadata = Span<const PathMetadata>(w.metadata.data(), w.metadata.size()); // (a takeoff's path's airfield and runway: 4.52)
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
                                            &extras);
@@ -1536,8 +1557,11 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         if (const CapabilityStatus own = vehicleStatus(index, state); own.availability != Availability::Available) return rejected(own.reason);
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
         // the flight phase, as the status tells a policy (docs/flight-autonomy.md, 4.5): never FA's own sources
+        // (on the ground, a route that starts there flies: 4.52 - asked only then, out of line)
         if (options.source == Source::Policy)
-            if (const Reason why = phase(d, state); why != Reason::None) return rejected(why);
+            if (const Reason why = phase(d, state);
+                why != Reason::None && (why != Reason::OnGround || !groundStart(command, waypoints, extras ? extras->paths : Span<const RoutePath>{})))
+                return rejected(why);
     }
 
     Command setpoint = command;
@@ -2199,7 +2223,8 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
     const MustFlyArea* area = extras && extras->area ? extras->area : w.area.laidOut() ? &w.area : nullptr; // (4.43, 4.44)
-    const RouteExtras given{held, planned, pathed, branched, terminated, area};
+    RouteExtras given{held, planned, pathed, branched, terminated, area};
+    given.pathMetadata = Span<const PathMetadata>(w.metadata.data(), w.metadata.size()); // (4.52)
     if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape, &given); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);

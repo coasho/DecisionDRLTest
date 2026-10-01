@@ -1,6 +1,6 @@
 """A launch through Python (docs/flight-autonomy.md, 4.49): a C172 parked on a runway takes off along it and climbs out, calm and
 in a crosswind; a Crazyflie lifts to its hover; refused naming the field - an airfield or runway not the vehicle's - and in the
-air."""
+air. A rejected takeoff (4.50), a taxi (4.51), and a route that starts on the ground (4.52)."""
 import math
 import unittest
 
@@ -111,6 +111,70 @@ class LaunchTest(unittest.TestCase):
         with self.assertRaises(fsim.Rejected) as refused:  # back on itself at its first point
             v.submit_behavior("taxi", points=[at(300.0, 200.0), at(200.0, 200.0)])
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 0))
+
+    def test_a_route_from_the_ground(self):
+        # a route that starts on the ground (4.52): its taxi points to the runway's start, its runway points' takeoff, then its
+        # points in the air - as points, and as FA's own plan's taxi and takeoff paths; on a runway too short, rejected and failed
+        def layout(v, lat0, lon0, length):
+            s = v.state
+            ground = s.altitude_msl_m - s.altitude_agl_m
+            at = lambda n, e, t=fsim.HOLD: fsim.Waypoint(lat0 + n / R, lon0 + e / (R * math.cos(lat0)), waypoint_type=t)  # noqa: E731
+            up = lambda n, e: fsim.Waypoint(lat0 + n / R, lon0 + e / (R * math.cos(lat0)), ground + 600.0, "msl")  # noqa: E731
+            start, limit = at(160.0, 150.0), at(160.0 + length, 150.0)
+            v.load_airfield(fsim.Airfield(7, "", fsim.HOLD, (fsim.Runway(3, 0.0, length, fsim.RunwayCoordinates(
+                fsim.RunwayPoint(start.latitude_rad, start.longitude_rad, ground), fsim.RunwayPoint(start.latitude_rad, start.longitude_rad, ground),
+                fsim.RunwayPoint(limit.latitude_rad, limit.longitude_rad, ground))),)))
+            T = fsim.WaypointType
+            taxi = [at(60.0, 0.0, T.TAXI), at(60.0, 150.0, T.TAXI)]
+            return taxi, [at(160.0, 150.0, T.RUNWAY_START), at(160.0 + length, 150.0, T.RUNWAY_LIMIT)], [up(5000.0, 150.0), up(5000.0, 9000.0)], ground
+
+        def flown(w, v, a, lat0, lon0, ground):
+            for _ in range(600):
+                w.step(int(round(1.0 / w.step_seconds)))
+                s = v.state
+                if math.hypot((s.latitude_rad - lat0) * R - 5000.0, (s.longitude_rad - lon0) * R * math.cos(lat0) - 9000.0) < 300.0:
+                    break
+                if a.info.state not in (fsim.ActivityState.PENDING, fsim.ActivityState.ACTIVE):
+                    break
+            return v.state
+
+        w = world("py-ground-route")
+        v, lat0, lon0 = parked(w, "f16c")
+        taxi, runway, air, ground = layout(v, lat0, lon0, 3000.0)
+        a = v.submit_route(taxi + runway + air)
+        s = flown(w, v, a, lat0, lon0, ground)
+        self.assertEqual(a.info.state, fsim.ActivityState.ACTIVE)
+        self.assertLess(abs(s.altitude_msl_m - ground - 600.0), 50.0)
+        self.assertEqual(v.support("fsim.guidance.route/waypoint_type/runway").support, fsim.Support.SUPPORTED)
+        self.assertEqual(v.support("fsim.guidance.route/waypoint_type/taxi").support, fsim.Support.PARTIAL)
+        # FA's own plan: a taxi path, a takeoff path naming the runway, a primary path
+        w = world("py-ground-plan")
+        v, lat0, lon0 = parked(w, "f16c")
+        taxi, _, air, ground = layout(v, lat0, lon0, 3000.0)
+        points = [taxi[0], taxi[1]._replace(next=2), air[0]._replace(next=3), air[1]]
+        paths = [fsim.RoutePath(1, "taxi", 0, 2), fsim.RoutePath(2, "takeoff", 2, 1), fsim.RoutePath(3, "primary", 3, 1)]
+        v.load_plan(fsim.RoutePlan(41, fsim.BatchCommand("submit_route", points, paths=paths), path_metadata=[fsim.PathMetadata(1, airfield=7, runway=3)]))
+        self.assertTrue(v.plan_command(41, "prepare_for_activation").completed)
+        r = v.plan_command(41, "activate")
+        self.assertTrue(r.completed)
+        s = flown(w, v, r.activity, lat0, lon0, ground)
+        self.assertEqual(r.activity.info.state, fsim.ActivityState.ACTIVE)
+        self.assertLess(abs(s.altitude_msl_m - ground - 600.0), 50.0)
+        # a runway too short: its takeoff rejected, the route failed, stopped on the runway
+        w = world("py-ground-reject")
+        v, lat0, lon0 = parked(w, "c172")
+        taxi, runway, air, ground = layout(v, lat0, lon0, 250.0)
+        a = v.submit_route(taxi + runway + air)
+        flown(w, v, a, lat0, lon0, ground)
+        self.assertEqual((a.info.state, a.info.reason), (fsim.ActivityState.FAILED, "takeoff_rejected"))
+        self.assertTrue(v.state.on_ground)
+        # in the air: a route that starts on the ground cannot
+        flying = w.create_vehicle("air", "jsbsim:c172", latitude_deg=41.0, longitude_deg=0.0, altitude_msl_m=1000.0, airspeed_ms=50.0,
+                                  heading_deg=0.0)
+        w.step(10)
+        with self.assertRaises(fsim.Rejected) as refused:
+            flying.submit_route(taxi + runway + air)
+        self.assertEqual(refused.exception.reason, "airborne")
 
     def test_refusals(self):
         w = world("py-launch-refused")

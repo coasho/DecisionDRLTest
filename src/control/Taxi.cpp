@@ -108,25 +108,45 @@ Reason CapabilityHost::prepareTaxi(BehaviorCommand& b, const sim::VehicleState& 
     if (n == 0 || n > TaxiBehavior::kMaxPoints) return at(static_cast<std::int16_t>(std::min<std::size_t>(n, 0x7FFF)), Reason::InvalidWaypoint);
     // its corners' arcs, a quarter wider than its tightest turn on its wheels: each leg must hold the arcs at its ends, each
     // corner be no sharper than kMostTurnRad - else the point it cannot turn at, with its turn rate the limit
-    const double tightest = profile_ && std::isfinite(profile_->envelope.groundTurnRadiusM) ? profile_->envelope.groundTurnRadiusM : kTightestUnknownM;
-    const double radius = std::max(kWiderThanTightest * tightest, kLeastTurnM);
+    RouteGround handling;
+    taxiHandling(b.param("speed_ms", 8.0), handling);
+    const double radius = handling.taxiRadiusM;
     std::array<double, TaxiBehavior::kMaxPoints + 1> north{}, east{};
     for (std::size_t i = 0; i < n; ++i)
         geo::localNorthEastM(state.latitudeRad, state.longitudeRad, b.points[i].latitudeRad, b.points[i].longitudeRad, north[i + 1], east[i + 1]);
     std::array<TaxiBehavior::Piece, 2 * TaxiBehavior::kMaxPoints + 1> path;
     int bad = -1;
     if (draw(north.data(), east.data(), n, radius, path.data(), bad) == 0) return at(static_cast<std::int16_t>(bad), Reason::InvalidWaypoint, Constraint::MaxTurnRate);
-    const double speed = b.param("speed_ms", 8.0);
+    TaxiBehavior::write(handling, state.latitudeRad, state.longitudeRad, b);
+    return Reason::None;
+}
+
+int CapabilityHost::taxiFault(double lat0, double lon0, const double* latitudes, const double* longitudes, std::size_t n, double radius) const noexcept {
+    if (n == 0 || n > TaxiBehavior::kMaxPoints) return static_cast<int>(std::min<std::size_t>(n, TaxiBehavior::kMaxPoints));
+    std::array<double, TaxiBehavior::kMaxPoints + 1> north{}, east{};
+    for (std::size_t i = 0; i < n; ++i) geo::localNorthEastM(lat0, lon0, latitudes[i], longitudes[i], north[i + 1], east[i + 1]);
+    std::array<TaxiBehavior::Piece, 2 * TaxiBehavior::kMaxPoints + 1> path;
+    int bad = -1;
+    return draw(north.data(), east.data(), n, radius, path.data(), bad) == 0 ? bad : -1;
+}
+
+void CapabilityHost::taxiHandling(double speed, RouteGround& out) const noexcept {
+    const double tightest = profile_ && std::isfinite(profile_->envelope.groundTurnRadiusM) ? profile_->envelope.groundTurnRadiusM : kTightestUnknownM;
+    const double radius = std::max(kWiderThanTightest * tightest, kLeastTurnM);
     const double yaw = profile_ && std::isfinite(profile_->envelope.groundYawAccelRadS2) && profile_->envelope.groundYawAccelRadS2 > 0.0
                            ? profile_->envelope.groundYawAccelRadS2 : kYawAccelUnknown;
     // its speed round an arc: its sideways acceleration kSideMs2, and slow enough that the turn's yaw rate v / R, building
     // at its yaw acceleration a in (v / R) / a, carries it no more than kBuildOffM off: (v t)^2 / 2R, so v^2 <= a R sqrt(2 R
     // kBuildOffM) (a heavy's nose tyre turns it slowly: the KC-135R swung 94 deg past a corner at 3.4 m/s)
     const double building = std::sqrt(yaw * radius * std::sqrt(2.0 * radius * kBuildOffM));
-    b.params["_lat0"] = state.latitudeRad, b.params["_lon0"] = state.longitudeRad;
-    b.params["_radius"] = radius, b.params["_tightest"] = tightest, b.params["_yaw"] = yaw;
-    b.params["_turn_ms"] = std::min({speed, std::sqrt(kSideMs2 * radius), building});
-    return Reason::None;
+    out.taxiSpeedMs = speed, out.taxiRadiusM = radius, out.tightestM = tightest, out.yawAccel = yaw;
+    out.taxiTurnMs = std::min({speed, std::sqrt(kSideMs2 * radius), building});
+}
+
+void TaxiBehavior::write(const RouteGround& g, double lat0, double lon0, BehaviorCommand& b) {
+    b.params["speed_ms"] = g.taxiSpeedMs;
+    b.params["_lat0"] = lat0, b.params["_lon0"] = lon0;
+    b.params["_radius"] = g.taxiRadiusM, b.params["_tightest"] = g.tightestM, b.params["_yaw"] = g.yawAccel, b.params["_turn_ms"] = g.taxiTurnMs;
 }
 
 void TaxiBehavior::reset() {
@@ -149,6 +169,18 @@ void TaxiBehavior::start(const ControlContext& ctx, const BehaviorCommand& comma
         geo::localNorthEastM(lat0_, lon0_, command.points[i].latitudeRad, command.points[i].longitudeRad, north[i + 1], east[i + 1]);
     int bad = -1;
     count_ = draw(north.data(), east.data(), n, turnRadiusM_, path_.data(), bad); // (0: nothing to taxi - it stops where it is)
+}
+
+void TaxiBehavior::startResolved(const ControlContext& ctx, const RouteGround& g, const double* latitudes, const double* longitudes, std::size_t n) {
+    reset();
+    const auto& s = ctx.sensed;
+    lat0_ = s.latitudeRad, lon0_ = s.longitudeRad;
+    speedMs_ = g.taxiSpeedMs, turnRadiusM_ = g.taxiRadiusM, tightestM_ = g.tightestM, turnMs_ = g.taxiTurnMs, yawAccel_ = g.yawAccel;
+    std::array<double, kMaxPoints + 1> north{}, east{};
+    n = std::min(n, kMaxPoints);
+    for (std::size_t i = 0; i < n; ++i) geo::localNorthEastM(lat0_, lon0_, latitudes[i], longitudes[i], north[i + 1], east[i + 1]);
+    int bad = -1;
+    count_ = draw(north.data(), east.data(), n, turnRadiusM_, path_.data(), bad);
 }
 
 void TaxiBehavior::at(double s, double& north, double& east, double& course) const noexcept {

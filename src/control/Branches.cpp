@@ -129,6 +129,7 @@ void CapabilityHost::holdExtras(Waiting& w, const RouteExtras* extras) const {
     w.paths.reserve(PathStore::kRoutePaths), w.paths.clear();
     w.branches.reserve(PathStore::kRouteBranches), w.branches.clear(), w.commanded = 0;
     w.terminators.reserve(PathStore::kRouteTerminators), w.terminators.clear();
+    w.metadata.clear();
     w.area = extras && extras->area ? *extras->area : MustFlyArea{}; // (a must fly's zone: 4.43)
     w.marshall = extras && extras->marshall ? *extras->marshall : MarshallStack{}; // (a marshall's stack: 4.46)
     w.intercept = extras && extras->intercept ? *extras->intercept : InterceptCommand{}; // (a route intercept: 4.47)
@@ -138,6 +139,7 @@ void CapabilityHost::holdExtras(Waiting& w, const RouteExtras* extras) const {
     w.paths.assign(extras->paths.begin(), extras->paths.end());
     w.branches.assign(extras->branches.begin(), extras->branches.end());
     w.terminators.assign(extras->terminators.begin(), extras->terminators.end());
+    w.metadata.assign(extras->pathMetadata.begin(), extras->pathMetadata.end());
 }
 
 std::uint32_t ControlStack::ahead(std::size_t slot, std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept {
@@ -207,6 +209,8 @@ bool RouteBehavior::branchAt(const ControlContext& ctx, const Performance& perf,
         const RouteBranch& b = p.branches[k];
         const bool commanded = (ctx.path->routeCommanded >> k & 1u) != 0;
         if (b.point != at || (b.operatorInput == 1.0 && !commanded) || !holds(ctx, b, p.branchCaptures[k])) continue;
+        if (ctx.path->routeGround.active && b.next >= 0.0 && taxiPoint(*ctx.path, static_cast<std::uint32_t>(b.next)))
+            continue; // (its rejected takeoff's taxi off the runway, which it takes on the ground: 4.52)
         double next = b.next;
         if (next < 0.0 && !fromPoint && route::loiterPoint(p.points[target_])) {
             // the route's end there, as its loiter ends: it loiters on - or, a route that repeats, back to its first point

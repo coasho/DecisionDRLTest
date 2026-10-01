@@ -47,6 +47,7 @@ add_executable(fsim_tests
     test_marshall.cpp
     test_launch.cpp
     test_taxi.cpp
+    test_ground_route.cpp
     test_intercept.cpp
     test_grants.cpp
     test_control_compat.cpp

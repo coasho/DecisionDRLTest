@@ -708,7 +708,7 @@ A-GRA's route segment ends at an end point that is one of three: a WayPoint ("a 
 - **Its kind** (`kind`, `EndPointKind`): left out, a turn point as `turn` says, as before. A waypoint is flown over, its next leg joined after it. A loiter point flies the loiter beside it (4.31); until FA-6b2 it was refused `not_implemented`, naming the point.
 - **A waypoint's type** (`waypointType`, `WaypointType`, A-GRA's WaypointTypeEnum): given alone, it makes the point a waypoint; given with another kind, it is refused `invalid_waypoint`.
   - Nav only and passive are flown. The end of a path is taken at its path's last point: the route's last until FA-6e1, then its path's as given (4.36) - a route without paths is one, and a point whose next is -1 ends it there. Where its path goes on it is none, refused `invalid_waypoint` naming the point (until FA-6e1, `not_implemented`).
-  - The others ask for an action FA does not fly yet. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are a taxi's points (FA-9, where the aircraft taxies), a runway's and a takeoff's (FA-9), an approach's and a touchdown (FA-10), and a hard ditch (FA-16).
+  - The others ask for an action. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are an approach's and a touchdown (FA-10), and a hard ditch (FA-16). A taxi's and a runway's points are flown where a route starts on the ground (4.52, FA-9d), and a takeoff's are flown as points.
 - **A point in a frame** (`frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM`, as a pattern's point in 4.25): its latitude and longitude are where the frame puts it, and those given are not read. Given a z, its altitude is the frame's there, above sea level.
   - Refused `invalid_waypoint`, naming the point: a frame the world does not have; its fields out of range; offsets without a frame; a seventeenth frame in one route (the path store keeps 16).
   - The host places the points at the NEW, where the frames are then; its checks (turns, gradients, terrain, endurance) see the route so placed. The path store keeps each frame as it was then; a moving one goes on at its velocity from there.
@@ -1060,7 +1060,7 @@ FA keeps what is safety critical: the airfields and the route plans for takeoff,
   - a departure's: AIRBORNE, ARCING, BREAKING, ON_DEP_RADIAL (CV Admin's);
   - an approach's: INITIAL_APP, INTERMEDIATE_APP, FINAL_APP and BOLTER_WAVEOFF (CV Admin's recovery).
   A taxi route (TAXI) is MA's too: an aborted takeoff's is FA's as part of its takeoff plan.
-- **What flies:** FA's plans fly as their routes, as MA's do (4.39). A path's type is a label (4.36): a takeoff's or a landing's path is flown as its points, not as a takeoff or a landing, until FA-9 and FA-10 build those (their support rows say so).
+- **What flies:** FA's plans fly as their routes, as MA's do (4.39). A path's type is a label (4.36), except where FA-9d reads it. A taxi path and a takeoff path that start a route are flown as a taxi and a takeoff from the runway its metadata names (4.52). A landing's path is flown as its points until FA-10.
 - **A named change to 4.39:** a plan with a takeoff's, a departure's, an approach's or a landing's path, published by MA, is refused. FA-7a kept it as any other.
 - **The support rows,** `fsim.plan/fa_plans` and `fsim.plan/airfields`, are supported on every aircraft.
 - **Surfaces.**
@@ -1335,7 +1335,7 @@ A-GRA's LAUNCH takes an aircraft from an airfield's runway into the air (LCH-01)
 
 ### 4.50 A rejected takeoff (as FA-9b builds it)
 
-A-GRA puts "Rejected Take Off and Abort commands" among Flight Autonomy's own functions (VI 1.4, row 10.2), and commands an abort as a CANCEL (the ICD's C2 Commanded Abort, CommandState CANCEL). A takeoff on the runway is never simply let go: below its decision speed it is stopped on the runway, above it flown off (LCH-02). The aborted takeoff's taxi route off the runway, a plan's path chained to the takeoff's, is FA-9c's and FA-9d's.
+A-GRA puts "Rejected Take Off and Abort commands" among Flight Autonomy's own functions (VI 1.4, row 10.2), and commands an abort as a CANCEL (the ICD's C2 Commanded Abort, CommandState CANCEL). A takeoff on the runway is never simply let go: below its decision speed it is stopped on the runway, above it flown off (LCH-02). The aborted takeoff's taxi route off the runway, a plan's path chained to the takeoff's, is a route's (4.52).
 
 - **The decision speed (V1)** is where the aircraft can no longer stop in the runway left. It can stop from a speed if a second's reaction at that speed, then braking at 2.5 m/s² (a wet runway's; a dry one gives about twice that), ends 30 m short of the runway's end. Below its rotation speed, where it can still stop, it is below its decision speed. On a long runway V1 is Vr. The E-3G and the C-17A, slow to accelerate, are past theirs before 97 % of Vr on 3,500 m.
 - **FA rejects a takeoff itself** below its decision speed, when for a second on end either:
@@ -1369,8 +1369,48 @@ A-GRA's taxi is a route of waypoints that MA sends and FA validates against the 
   - **Obstructions:** another vehicle on the ground within 25 m of its path ahead, as far as it could stop from its taxi speed plus 55 m, stops it 30 m short of where its path comes nearest the vehicle. It reports itself held (`kActivityClamped`) as long as the vehicle stays, and goes on when it has gone. The world tells a behaviour its vehicles (`WorldView::vehicles`).
   - **Done:** stopped within 2 m of its last point for a second, it completes on its brakes.
 - **Why the yaw:** a heavy's nose tyre yaws its inertia slowly, at 0.03 to 0.08 rad/s² against most fighters' 0.2 to 0.7. Taken at a fighter's pace, the KC-135R swung 94° past a 90° corner at 3.4 m/s and wandered 115 m off its path. A point ahead pursued, looked for as far ahead as a heavy needs, cut a fighter's 8 m arcs 2.4 m inside.
-- **The support table:** `fsim.guidance.taxi` is supported on every wing, not implemented on a rotorcraft with wheels, and not supported without wheels (R2). A route's taxi points (`route/waypoint_type/taxi`) and FA's plans' taxi paths are FA-9d's.
+- **The support table:** `fsim.guidance.taxi` is supported on every wing, not implemented on a rotorcraft with wheels, and not supported without wheels (R2). A route's taxi points (`route/waypoint_type/taxi`) and FA's plans' taxi paths are flown by a route that starts on the ground (4.52).
 - **Surfaces.** C++: the "taxi" behaviour, `TaxiBehavior` (fsim/BuiltinControllers.h), `CapabilityHost::prepareTaxi`, `WorldView::vehicles`, `CapabilityDescriptor::ground`, the profile's `EnvelopeSection::groundTurnRadiusM` and `groundYawAccelRadS2`. No C ABI change: a behaviour and its points go by its id. Python: `Vehicle.submit_behavior("taxi", points=[...], speed_ms=)`.
+
+### 4.52 A route that starts on the ground (as FA-9d builds it)
+
+A-GRA's route reaches the ground at both ends: its waypoint types name a taxi's points, a runway's and a takeoff's (WaypointTypeEnum), and its path types a taxi route and a takeoff (MA_RoutePathType). FA's own plan for a takeoff is a taxi path to the runway, then the takeoff's path, which names the airfield and runway (4.40), then the departure. An aborted takeoff's taxi route is a TAXI path that the takeoff's path chains to by a ConditionalPathSegment (4.50). FA-9d flies such a route's start on the ground: a taxi (4.51), then a takeoff (4.49), then its points in the air. A landing's end is FA-10's.
+
+- **A route starts on the ground** where its first point (its `start`) is a taxi's point or a runway's, or lies in a taxi path or a takeoff path. The host then reads it, at the NEW, in the order it is flown (each point's `next`, else the next in its path):
+  - **its taxi:** the taxi's points from its start (`WaypointType::Taxi`, or a point in a TAXI path), 63 at most;
+  - **its takeoff**, one of two kinds:
+    - its runway's points: a runway's start (`RunwayStart`), then its threshold or limit, the last of them its end. The takeoff runs along the line between the two, which must be over 100 m long. The point after them is its first in the air;
+    - a takeoff path, on FA's own plan: the airfield and runway its `PathMetadata` names (4.40), the runway's takeoff line as a launch resolves it. The takeoff path's first point is its first in the air.
+  - **its taxi to the runway:** its taxi points, then the runway's start. It is checked as a taxi's (4.51): the corners' arcs must fit its legs, at its first point's speed (1 to 15 m/s; else 8). With no taxi, the wing must stand on the runway, as a launch's must (4.49);
+  - **its aborted takeoff's taxi**, if it has one: a branch at a runway point, or at the takeoff path's first point, to a taxi point (A-GRA's chained TAXI path). Its taxi points from there are the taxi off the runway.
+- **Its refusals**, naming the point:
+  - `invalid_waypoint`: a runway's start with no end, a takeoff with no point in the air after it, a taxi's or a runway's point after the first in the air, a taxi loop, no taxi and not on the runway, and a corner the taxi cannot turn (with `max_turn_rate`);
+  - `unknown_airfield`: a takeoff path without the airfield and runway of FA's own plan;
+  - `not_implemented`: a taxi alone, or to a point in the air with no takeoff between (a taxi after a landing is FA-10's); a rotorcraft's taxi or runway points; a wing with no speed to rotate at;
+  - `airborne`: such a route given in the air.
+- **The flight phase:** a policy's route that starts on the ground is offered on the ground (4.5), and every other route still waits for the aircraft to fly. The route's status stays the airborne guidance's.
+- **The rest of the route** is checked and completed as any route's, from its first point in the air (its `start` moved there), and from where the aircraft will be once it has taken off:
+  - a wing over the runway's start, 150 m up, on its course;
+  - a rotorcraft 10 m over where it stands.
+
+  The speed it leaves out is the aircraft's reference airspeed, as a mode given no speed flies (4.22). It is no faster than 250 kt, the limit below 10,000 ft (14 CFR 91.117), and no slower than its climb speed:
+  - completed from the parked aircraft, its first point's speed was 0, the least it can fly: the C172 sank back to the runway after its climb-out;
+  - at its climb speed, 1.3 times its stall, the EA-18G and the RQ-4B, clean and banked, lost 500 m in the first turn, into the ground;
+  - a reference airspeed is a cruise's, up high: the KC-46A's 197 m/s overshot its first turn by 4.5 km.
+- **Flown** by the route's behaviour, which carries a taxi's and a launch's behaviours for its start on the ground (`RouteBehavior`, GroundRoute.cpp). It flies them at the actuator level, as their own capabilities do:
+  - its taxi to the runway's start, stopped there;
+  - its takeoff along the runway: lined up, the roll, the rotation and the climb-out to 150 m, its gear up and flaps up (a rotorcraft's lift to its hover, 10 m up);
+  - then its points, planned afresh from where it is, as any route is.
+
+  Its progress meanwhile is the taxi's or the launch's. Its axes are the primary ones with the gear, flaps and brakes: a taxi's brakes are not let go to the vehicle default while it taxies.
+- **Its takeoff rejected** (4.50): with a taxi off the runway, it taxies there once stopped, then the route fails `takeoff_rejected`. Without one, it fails stopped on the runway, on its brakes. That branch is never taken in the air.
+- **Canceled by its policy** on the runway, it hands the rest of its takeoff to FA, as a launch does (4.50). A launch now hands on its runway's line and speeds as it resolved them, so a route's runway points, which name no airfield, can be handed on too.
+- **The line-up** (4.49) rolls once the wing is within 2 m of the centre line and 3 deg of its course, as before. After 10 s it rolls within 4 m and 6 deg. The Skua, weathervaned 3.3 deg into a 10 m/s crosswind and 3 m off at a walking pace, never rolled; the roll's steering takes it onto the line.
+- **The support table:**
+  - a route's runway points (`route/waypoint_type/runway`): supported on every wing, not implemented on a rotorcraft;
+  - its takeoff points (`/takeoff`): supported, flown as points;
+  - its taxi points (`/taxi`): partial on a wing, missing a taxi alone, after a landing (FA-10).
+- **Surfaces.** C++: `RouteGround` and `PathStore::routeGround`; `RouteBehavior::handOver`; `LaunchBehavior::write` and `startResolved`, `TaxiBehavior::write` and `startResolved`. No new C ABI or Python call: a route's waypoint types, paths, branches and a plan's path metadata already go through. Python's twin flies them.
 
 ## 5. Applicability (D6)
 
@@ -3506,6 +3546,33 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - The other NEWs and updates are within −0.8 % to +2.2 %, the micro cases within −1.7 % to +3.0 %, and −1.7 % to +1.1 % from three copies.
   - World throughput from three copies is 99.1 to 99.7 % of FA-9b's. From one directory it read the F-16C at 96.3 %, and protection at 2.1 %, a single directory's drift (FA-6g3b's lesson).
 - ctest: all 385 tests pass.
+
+**FA-9d, a route that starts on the ground (WPT-26, LCH-01, LCH-02).**
+- What it built is 4.52, in C++ and Python: a route's taxi and runway points, and FA's own plan's taxi and takeoff paths, flown as a taxi, a takeoff and the route on from there. With it FA-9 is done: WPT-26, LCH-01, LCH-02, LCH-04 and CAP-02.
+- **Flown**, every wing parked and given one route (a probe, then `test_ground_route`, `test_fleet` and the Python twin):
+  - **the route:** a taxi north 60 m and east 150 m to the runway's start, the runway 3,000 m north, then two points 600 m above the field, 8 km north and 4.85 km east, a right turn between;
+  - **in calm air:** all 31 completed it, as points and as FA's own plan alike, to the bit. The taxi kept within 1.26 m of its path as drawn (the KC-46A), but for the U-2S: 3.12 m in its first corner, whose 37 m arcs begin 23 m from where it stands. The taxi behaviour alone does the same on that layout (4.51's 1.64 m was from 75 m along a 150 m leg). On the runway every wing kept within 0.3 m of the centre line, but for the U-2S (2.7 m). Every wing reached its points' height within 25 m;
+  - **in a 10 m/s crosswind:** all 31 completed it. The taxi kept within 1.25 m (the U-2S 2.63 m). The centre line within 6.9 m (the KC-135R; the U-2S 4.9, the Skua 4.3);
+  - **the heavies:** at 250 kt the C-17A, the E-3G and the KC-46A turned 3 km wide of their first point, onto a 4.85 km leg, and passed their last point as far off it. That is the route's own turn at that speed.
+- **The fleet's case**, all at once from their standard places (a taxi north 150 m and east 200 m, its first leg longer): within 1.62 m of the taxi's path (the U-2S; the KC-46A 1.27, the B-52H 1.20) and 2.73 m of the centre line (the U-2S; the rest within 0.31 m), 598.8 to 607.9 m up at the end.
+- **A rotorcraft**, by FA's own plan's takeoff path: the UH-1H and UH-60A lifted to their hovers over where they stood, then flew the plan. The quadrotors' 8 km routes are refused for their endurance.
+- **Its takeoff rejected:** the C172 on a 250 m runway rejected its takeoff and stopped 46 m along it, taxied to the end of its abort path 100 m off the runway, and its route failed `takeoff_rejected`; without one it stopped on the runway and failed. A policy's CANCEL in the roll was handed on to FA's own launch, which stopped it.
+- **Found and fixed:**
+  - **The taxi never stopped** at the runway's start: the route held no brake axis, so its taxi's brakes went to the vehicle default. It ran on past the runway at 6 m/s. A route that starts on the ground now owns the gear, flaps and brakes.
+  - **The route completed from the parked aircraft** flew its first point at 0 m/s, clamped to its least. The C172 sank back to the runway and rolled 5 km on it. Then the climb speed (1.3 times its stall) flew the EA-18G and the RQ-4B into the ground in the first turn. Then the reference airspeed overshot the KC-46A's first turn by 4.5 km. Now the reference airspeed, at most 250 kt (4.52).
+  - **The Skua never rolled** in the crosswind: weathervaned 3.3 deg and 3 m off at the line-up, just outside its 3 deg and 2 m. After 10 s the line-up now rolls within twice those.
+  - **A CANCEL of the route's takeoff** handed on a launch from airfield 0, which was refused. A launch now hands on its line and speeds as resolved.
+  - **A rotorcraft's taxi row read partial:** only a supported row was made not implemented for an aircraft that hovers; a partial one is now too.
+  - **The test of a route's point types:** a taxi's and a runway's points in the air are still refused `not_implemented` (a taxi after a landing is FA-10's), their rows now partial and supported; a takeoff's points are flown.
+- **The fleet** (1,751 states as flights are judged, 2,345 as cases end): identical to FA-9c's to the bit, the new case's group aside.
+- **Unchanged, to the last bit:** the digests with protection and without, the route probe (120 lines) and the curve probe (64). The allocation gate passes.
+- **The steps allocate nothing.** The route's taxi and launch are made with it, at its NEW, and started from the host's resolution (`TaxiBehavior::startResolved`, `LaunchBehavior::startResolved`), not from a behaviour's parameters: a map and a vector built inside a step. The allocation gate gains the case: a parked C172's route counted from its first step through its taxi, its takeoff and its points planned afresh in the air, 200 m up. None.
+- **A/B throughput** against FA-9c (edeb84f), each build from its own directory and from three copies, in quiet windows:
+  - The micro cases are within −2.4 % to +1.3 % from one copy, and −1.9 % to +1.4 % from three. World throughput is 100.0 to 100.3 % of FA-9c's, and 99.8 to 100.3 % from three copies. Protection costs at most 0.4 %.
+  - The other NEWs and updates are within −1.6 % to +1.6 %.
+  - A behaviour's NEW reads slower. It first read +14 to +16 %: the route's prepared start on the ground (`ground_`), read at every NEW, sat at the host's far end, a cold line (FA-7a's lesson). It is now a flag in the hole beside `policyNew_`, and the NEW read +8 to +12 %. With the steps' allocations taken out it read +22 to +24 % (+21 % from three copies), though nothing on its path changed: only code elsewhere in the benchmark and the library.
+  - That is placement. Restoring FA-9c's phase check exactly read +16 %. With every function aligned to 64 bytes, both builds made from their trees, a behaviour's NEW is +1.4 %, and 3.3 % faster from three copies. The other NEWs and updates are within −1.5 % to +0.7 %, and the micro cases within −0.9 % to +0.9 %.
+- ctest: all 389 tests pass.
 
 ## Appendix A: the inventory
 

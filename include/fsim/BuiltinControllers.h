@@ -412,6 +412,11 @@ public:
     Phase phase() const noexcept { return phase_; }
     /// Whether it could stop on the runway from `speedMs` where it is now: a second's reaction, then its brakes.
     bool canStop(double speedMs) const noexcept;
+    /// A takeoff as the host resolved it (its line, speeds and rotation: 4.49) into the parameters it flies by.
+    static void write(const RouteGround& resolved, BehaviorCommand& command);
+    /// A route's takeoff (4.52), as the host resolved it, climbed out at `completeAglM` (a rotorcraft's hover `hoverAglM` up) -
+    /// as start() with the parameters write() gives, nothing allocated (it starts inside a step).
+    void startResolved(const ControlContext& ctx, const RouteGround& resolved, double completeAglM, double hoverAglM);
 
 private:
     Command roll(const ControlContext& ctx);
@@ -431,7 +436,7 @@ private:
     double rotateStartS_ = -1.0, airborneS_ = -1.0, pitchRefRad_ = 0.0, rotationRad_ = 0.0, rotateFromRad_ = 0.0, pitchIntegral_ = 0.0;
     double crossIntegral_ = 0.0;
     double lastS_ = -1.0;
-    double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0;
+    double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0, lineUpS_ = 0.0;
     bool gearUp_ = false, flapsUp_ = false;
 };
 
@@ -451,7 +456,12 @@ public:
     };
 
     const char* id() const noexcept override { return "taxi"; }
+    /// A taxi as the host resolved it (its corners and speeds: 4.51), from (lat0, lon0), into the parameters it flies by.
+    static void write(const RouteGround& resolved, double lat0, double lon0, BehaviorCommand& command);
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
+    /// A route's taxi (4.52): from where it stands through `n` points, its corners and speeds as the host resolved them - as
+    /// start() with the parameters write() gives, nothing allocated (it starts inside a step).
+    void startResolved(const ControlContext& ctx, const RouteGround& resolved, const double* latitudes, const double* longitudes, std::size_t n);
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
     bool finished() const noexcept override { return done_; }

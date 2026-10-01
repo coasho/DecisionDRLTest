@@ -999,6 +999,23 @@ struct MustFlyArea {
     bool laidOut() const noexcept { return shape != ZoneShape::Count || lineCount != 0 || volume != VolumeShape::Count; }
 };
 
+/// A route's start on the ground (docs/flight-autonomy.md, 4.52), as the host resolved it at its NEW
+/// (CapabilityHost::prepareGroundRoute): its taxi to the runway (4.51) and its takeoff (4.49), flown before its first point in
+/// the air - and the taxi off the runway its takeoff's branch leads to, should it reject its takeoff (4.50).
+struct RouteGround {
+    static constexpr std::size_t kPoints = 64;
+    bool active = false;                ///< the route starts on the ground: a takeoff, a taxi to it before
+    std::uint16_t taxiCount = 0, abortCount = 0;
+    double taxiLatitudeRad[kPoints] = {}, taxiLongitudeRad[kPoints] = {};   ///< its taxi's points in turn, to the runway's start
+    double abortLatitudeRad[kPoints] = {}, abortLongitudeRad[kPoints] = {}; ///< the taxi off the runway, its takeoff rejected (4.50)
+    // its taxi's, as a taxi's NEW resolves them (4.51)
+    double taxiRadiusM = 0.0, tightestM = 0.0, yawAccel = 0.0, taxiTurnMs = 0.0;
+    double taxiSpeedMs = 8.0;
+    // its takeoff's, as a launch's NEW resolves them (4.49): the takeoff line, the speeds, the rotation attitude
+    double startLatitudeRad = 0.0, startLongitudeRad = 0.0, courseRad = 0.0, lengthM = 0.0;
+    double rotationCasMs = 0.0, climbCasMs = 0.0, rotationRad = 0.0, airfield = 0.0, runway = 0.0;
+};
+
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
 /// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
 /// by the host between steps, read by the mode's behaviour during them
@@ -1055,6 +1072,8 @@ struct PathStore {
     /// The route intercept that flies (4.47): as given, and where it joined the route beside it.
     InterceptCommand intercept;
     InterceptJoin interceptJoin;
+    /// The route's start on the ground (4.52): its taxi and its takeoff, as the host resolved them.
+    RouteGround routeGround;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").

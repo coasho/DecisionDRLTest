@@ -61,7 +61,8 @@ add_library(fsim_control STATIC
     PlanStore.h
     Intercept.cpp
     Launch.cpp
-    Taxi.cpp)
+    Taxi.cpp
+    GroundRoute.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

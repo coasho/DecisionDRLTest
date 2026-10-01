@@ -133,6 +133,8 @@ struct RouteExtras {
     SetpointKind late = SetpointKind::Count;
     const MarshallStack* marshall = nullptr;
     const InterceptCommand* intercept = nullptr; ///< null for one resumed: flown on as it was laid (4.47)
+    /// A plan's paths' metadata (4.39): the airfield and runway its takeoff's path names (4.52).
+    Span<const PathMetadata> pathMetadata{};
 };
 
 class CapabilityHost {
@@ -531,6 +533,7 @@ private:
         std::vector<RouteBranch> branches; ///< a route's conditional branches (4.37)
         std::uint32_t commanded = 0;      ///< the branches the operator has commanded (4.37: bit k, branch k)
         std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
+        std::vector<PathMetadata> metadata; ///< a plan's route's paths' metadata: its takeoff's airfield and runway (4.52)
         MustFlyArea area; ///< a must fly's zone, corridor or volume given with it, as laid out (4.43 to 4.45; laidOut() false: none)
         MarshallStack marshall; ///< a marshall's stack, beside its pattern (4.46)
         InterceptCommand intercept; ///< a route intercept's, beside its plan's route (4.47)
@@ -919,6 +922,34 @@ private:
     /// wing's rotation and climb speeds, written into the behaviour's parameters. UnknownAirfield or InvalidParameter with the
     /// field (0 the airfield, 1 the runway); NotImplemented for a wing with no speed to rotate at.
     Reason prepareLaunch(BehaviorCommand& launch, const sim::VehicleState& state, CommandResult& detail);
+    /// An airfield's runway's takeoff line into `out` (4.49; Launch.cpp): UnknownAirfield or InvalidParameter with the field.
+    Reason takeoffLine(double airfield, double runway, RouteGround& out, CommandResult& detail) const;
+    /// Whether a wing stands on that line, ready to take off along it (4.49; Launch.cpp).
+    bool onRunway(const RouteGround& line, const sim::VehicleState& state) const noexcept;
+    /// A wing's rotation and climb speeds and rotation attitude into `out` (4.49; Launch.cpp): false where it has no speed to
+    /// rotate at (a stock model's).
+    bool takeoffSpeeds(RouteGround& out) const noexcept;
+    /// A taxi's corner radius, tightest turn, yaw acceleration and arc speed at `speed` into `out` (4.51; Taxi.cpp).
+    void taxiHandling(double speed, RouteGround& out) const noexcept;
+    /// The point (0 the first) whose corner or leg a taxi from (lat0, lon0) through `n` points cannot draw with corners of
+    /// `radius` (4.51; Taxi.cpp); -1 for none.
+    int taxiFault(double lat0, double lon0, const double* latitudes, const double* longitudes, std::size_t n, double radius) const noexcept;
+    /// A route that starts on the ground (4.52; GroundRoute.cpp): its taxi points from its start, then a takeoff - its runway
+    /// points', or the airfield and runway of a takeoff's path it starts in (`extras`' plan metadata) - checked and resolved
+    /// into ground_, the route's start moved to its first point in the air, and the route checked (checkRoute) from where it
+    /// will have taken off (departed). NotImplemented, NotSupported or Airborne for
+    /// what cannot be flown; InvalidWaypoint at a point it cannot taxi or take off from.
+    Reason prepareGroundRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
+                              const RouteExtras* extras);
+    /// Whether a route starts on the ground (4.52; GroundRoute.cpp): its first point a taxi's or a runway's, or in a taxi's or
+    /// takeoff's path. The flight phase lets a policy's such route fly on the ground, and no other.
+    bool startsOnGround(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RoutePath> paths) const noexcept;
+    /// Where a route that starts on the ground (prepareGroundRoute's) goes on from, its takeoff flown (4.52; GroundRoute.cpp): over
+    /// the runway's start, climbed out on its course at its climb speed (a rotorcraft hovering over where it stands) - what its
+    /// points are completed and checked from.
+    void departed(sim::VehicleState& state) const noexcept;
+    /// Whether `command` is a route that starts on the ground (startsOnGround): the flight phase lets a policy's fly there (4.52).
+    bool groundStart(const Command& command, Span<const Waypoint> waypoints, Span<const RoutePath> paths) const noexcept;
     /// A taxi's NEW (4.51; Taxi.cpp): its points checked against the aircraft's tightest turn on its wheels - each corner's
     /// arc fits its legs, none sharper than 170 deg - else InvalidWaypoint at the point, MaxTurnRate; its path's origin and
     /// arcs written into the behaviour's parameters. NotImplemented for an aircraft that hovers.
@@ -1030,6 +1061,9 @@ private:
     /// The NEW being prepared is a policy's: a launch drops the host's own parameters from it (4.50). In the same hole: a
     /// strip of every policy behaviour's parameters at its NEW cost a behaviour's NEW 6-8 %.
     bool policyNew_ = false;
+    /// The route being prepared starts on the ground: ground_ holds its taxi and takeoff, to be written with it (4.52). In
+    /// the same hole: ground_ itself, at the host's far end, read at every NEW cost a behaviour's NEW 14 to 16 % (a cold line).
+    bool grounded_ = false;
     double controlPeriodS_ = 1.0 / 120.0;
     EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;
@@ -1089,6 +1123,8 @@ private:
     /// The wind a route's checks turn in (4.41): a plan validation's while one runs, else what the air data measure now.
     WindEstimate checkWind(const sim::VehicleState& state) const noexcept;
     std::unique_ptr<PlanStore, PlanStoreFree> plans_; ///< made at the first plan prepared for upload
+    /// A route's start on the ground as its NEW resolved it (4.52; GroundRoute.cpp), written with the route: made at the first.
+    std::unique_ptr<RouteGround> ground_;
 };
 
 } // namespace fsim::control

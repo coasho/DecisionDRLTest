@@ -1,4 +1,5 @@
 #include "fsim/GuidanceModes.h"
+#include "fsim/BuiltinControllers.h"
 
 #include "control/Atmosphere.h"
 #include "control/Registry.h"
@@ -294,7 +295,9 @@ double option(double v, double count) noexcept { return isHold(v) ? 0.0 : std::c
 
 } // namespace
 
-RouteBehavior::RouteBehavior() : plan_(std::make_unique<route::Plan>()), loiter_(std::make_unique<PatternBehavior>()) {}
+RouteBehavior::RouteBehavior()
+    : plan_(std::make_unique<route::Plan>()), loiter_(std::make_unique<PatternBehavior>()), taxi_(std::make_unique<TaxiBehavior>()),
+      launch_(std::make_unique<LaunchBehavior>()) {}
 RouteBehavior::~RouteBehavior() = default;
 
 namespace {
@@ -344,6 +347,7 @@ void RouteBehavior::reset() {
     plan_->trims = route::Trims{};
     lastTime_ = -1.0;
     planned_ = false; // planned afresh from where the aircraft is
+    ground_ = 0;
 }
 
 bool RouteBehavior::stops() const noexcept {
@@ -379,6 +383,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     if (!branched) {
         flown_ = command;
         planned_ = true;
+        ground_ = 0;
         revision_ = ctx.path ? ctx.path->revision : 0;
         laps_ = 0;
         finishedM_ = 0.0;
@@ -461,6 +466,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     lapM_ = p.lapM(true);
     beginSegment(p.start, s, finishedM_, 0.0, 0.0, true, false);
     decided_ = branched && fromPoint; // (the point flown to, its branch taken: 4.37)
+    if (!branched && ctx.path->routeGround.active && s.onGround) beginGround(ctx); // (its taxi and takeoff first: 4.52)
 }
 
 void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, double atM, double halfArcM, double leadM, bool firstLap, bool fromPoint) {
@@ -595,6 +601,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     constraints_ = 0;
     const auto* command = std::get_if<RouteCommand>(&in);
     if (command && (!planned_ || !ctx.path || ctx.path->revision != revision_ || !same(*command, flown_))) restart(ctx, *command);
+    if (ground_) return ground(ctx, in); // (its start on the ground: 4.52)
     const route::Plan& p = *plan_;
     groundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (!command || p.count == 0) { // nothing to fly: on as it flies (a rotorcraft still)
@@ -899,6 +906,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
 }
 
 bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
+    if (ground_) return groundProgress(out); // (its taxi's or its takeoff's: 4.52)
     const route::Plan& p = *plan_;
     if (!planned_ || p.count == 0) return false;
     const Waypoint& segment = p.points[segment_];

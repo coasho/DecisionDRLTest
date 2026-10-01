@@ -12,6 +12,8 @@
 namespace fsim::control {
 
 class ControllerRegistry;
+class TaxiBehavior;
+class LaunchBehavior;
 
 /// The wind as the aircraft's own air data see it: the ground velocity less
 /// the air velocity (true airspeed along its angles of attack and sideslip,
@@ -159,6 +161,9 @@ public:
     /// Where it is along its segments (4.47; Intercept.cpp): the point flown from and when it was captured (its state's clock),
     /// the point flown to and how far along the path it is, the one after it and the leg on; its loiter's orbits there.
     bool segments(SegmentEstimate& out) const noexcept override;
+    /// Its takeoff on the runway, a route's that starts on the ground (docs/flight-autonomy.md, 4.52): FA's own rest of it
+    /// (4.50).
+    bool handOver(BehaviorCommand& out) const override;
 
 private:
     /// Plan the route from where the aircraft is, and fly it from its start. `branchTo` given, a branch taken (4.37;
@@ -317,6 +322,18 @@ private:
     double interceptM_ = kHold; ///< an intercept's: its cross-track to the next leg at the last update
     double headingTrim_ = 0.0, lastHeading_ = kHold; ///< a heading leg's trim and the heading it last saw, as the hsa's
     bool stopping_ = false;            ///< a rotorcraft's stop at the end: its position loop's, from where it would stop (until canceled)
+    // its start on the ground (4.52; GroundRoute.cpp): its taxi to the runway and its takeoff, flown by their behaviours
+    // before its first point in the air - allocated at its first
+    void beginGround(const ControlContext& ctx);
+    void beginTakeoff(const ControlContext& ctx);
+    Command ground(const ControlContext& ctx, const Command& in);
+    bool groundProgress(ActivityProgress& out) const noexcept;
+    /// Whether point `i` as given is a taxi's (its type, or its path's): a branch to one is its rejected takeoff's, never taken
+    /// in the air (4.52).
+    static bool taxiPoint(const PathStore& store, std::uint32_t i) noexcept;
+    std::uint8_t ground_ = 0; ///< 0 in the air (or none); 1 its taxi, 2 its takeoff, 3 off the runway rejected, 4/5 stopped so
+    std::unique_ptr<TaxiBehavior> taxi_;     ///< allocated with the behaviour: nothing in a step
+    std::unique_ptr<LaunchBehavior> launch_; ///< likewise
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

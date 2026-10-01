@@ -994,6 +994,49 @@ int alloc() {
             ++failures;
         }
     }
+    {
+        // a route that starts on the ground (docs/flight-autonomy.md, 4.52): its taxi begun inside a step, then its takeoff,
+        // then its points in the air planned afresh - counted from its first step to its climb-out
+        session::World gw(benchWorld("bench-alloc-ground", 1));
+        session::VehicleSpec parked;
+        parked.name = "c172-ground";
+        parked.type = "jsbsim:c172";
+        parked.initial.onGround = true;
+        parked.initial.headingDeg = 0.0;
+        parked.initial.airspeedTrueMs = 0.0;
+        const auto id = gw.createVehicle(parked);
+        for (int k = 0; k < 30; ++k) gw.step();
+        const sim::VehicleState s0 = *gw.vehicleState(id);
+        constexpr double kR = 6371000.0;
+        const double field = s0.altitudeMslM - s0.altitudeAglM;
+        const auto at = [&](double north, double east, WaypointType type, double up) {
+            Waypoint x;
+            x.latitudeRad = s0.latitudeRad + north / kR, x.longitudeRad = s0.longitudeRad + east / (kR * std::cos(s0.latitudeRad));
+            if (type != WaypointType::NavOnly) x.waypointType = static_cast<double>(type);
+            else x.altitudeM = field + up, x.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+            return x;
+        };
+        const std::vector<Waypoint> route = {at(60.0, 0.0, WaypointType::Taxi, 0.0), at(60.0, 150.0, WaypointType::Taxi, 0.0),
+                                             at(160.0, 150.0, WaypointType::RunwayStart, 0.0), at(3160.0, 150.0, WaypointType::RunwayLimit, 0.0),
+                                             at(8000.0, 150.0, WaypointType::NavOnly, 600.0), at(8000.0, 5000.0, WaypointType::NavOnly, 600.0)};
+        const CommandResult r = gw.submit(id, RouteCommand{}, route);
+        if (!r.accepted()) std::fprintf(stderr, "ground route: refused %s\n", reasonName(r.reason)), std::exit(3);
+        std::uint64_t n, fm;
+        {
+            Counting counting;
+            const int steps = static_cast<int>(250.0 / (gw.dt() * gw.frameSkip())); // (250 s at most: the C172 is climbing out at 200 m by 140 s)
+            for (int k = 0; k < steps && gw.vehicleState(id)->altitudeAglM < 200.0; ++k) gw.step();
+            n = counting.count();
+            fm = counting.flightModel();
+        }
+        const bool flown = gw.vehicleState(id)->altitudeAglM >= 200.0 && gw.activity(r.activity)->live();
+        std::printf("world: %-19s %12llu   (JSBSim: %llu)\n", "ground route", static_cast<unsigned long long>(n), static_cast<unsigned long long>(fm));
+        failures += n != 0;
+        if (!flown) {
+            std::printf("FAIL: the ground route never climbed out\n");
+            ++failures;
+        }
+    }
     std::printf(failures ? "FAIL: %d case(s) allocate\n" : "no allocations\n", failures);
     return failures ? 1 : 0;
 }

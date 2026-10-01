@@ -142,8 +142,8 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; the types n
     ends = w.endPoints(typed.activity, 4);
     REQUIRE(ends.size() == 3);
     CHECK(ends[0].kind == EndPointKind::Waypoint); // (reported as given: no turn there)
-    // not built yet: each named at its point, not implemented - a taxi's and a runway's and a takeoff's points (FA-9), an
-    // approach's and a touchdown (FA-10), a ditch (FA-16)
+    // not built yet: each named at its point, not implemented - an approach's and a touchdown (FA-10), a ditch (FA-16); a taxi's
+    // and a runway's points in the air, after a landing (FA-10: flown where a route starts on the ground, 4.52)
     auto refusedAt = [&](const std::vector<Waypoint>& points, Reason why, int index) {
         const CommandResult r = w.submit(byer, RouteCommand{}, points);
         INFO(reasonName(r.reason) << " at " << r.index);
@@ -153,14 +153,7 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; the types n
     const struct {
         WaypointType type;
         const char* row;
-    } unbuilt[] = {{WaypointType::Taxi, "taxi"},
-                   {WaypointType::RunwayStart, "runway"},
-                   {WaypointType::RunwayThreshold, "runway"},
-                   {WaypointType::RunwayLimit, "runway"},
-                   {WaypointType::Takeoff, "takeoff"},
-                   {WaypointType::TakeoffInitialPoint, "takeoff"},
-                   {WaypointType::TakeoffFinalPoint, "takeoff"},
-                   {WaypointType::Approach, "landing"},
+    } unbuilt[] = {{WaypointType::Approach, "landing"},
                    {WaypointType::ApproachInitialPoint, "landing"},
                    {WaypointType::ApproachFinalPoint, "landing"},
                    {WaypointType::Touchdown, "landing"},
@@ -173,6 +166,24 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; the types n
         REQUIRE(row);
         CHECK((row->support == Support::NotImplemented || row->support == Support::NotSupported));
         refusedAt({t0, x, t2}, row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented, 1);
+    }
+    for (WaypointType type : {WaypointType::Taxi, WaypointType::RunwayStart, WaypointType::RunwayThreshold, WaypointType::RunwayLimit}) {
+        Waypoint x = t1;
+        x.waypointType = static_cast<double>(type);
+        INFO(static_cast<int>(type));
+        refusedAt({t0, x, t2}, Reason::NotImplemented, 1);
+    }
+    CHECK(w.supportTable(byer)->find("fsim.guidance.route/waypoint_type/taxi")->support == Support::Partial);
+    CHECK(w.supportTable(byer)->find("fsim.guidance.route/waypoint_type/runway")->support == Support::Supported);
+    // a takeoff's points: flown as points (4.52)
+    CHECK(w.supportTable(byer)->find("fsim.guidance.route/waypoint_type/takeoff")->support == Support::Supported);
+    for (WaypointType type : {WaypointType::Takeoff, WaypointType::TakeoffInitialPoint, WaypointType::TakeoffFinalPoint}) {
+        Waypoint x = t1;
+        x.waypointType = static_cast<double>(type);
+        CommandOptions validate;
+        validate.validateOnly = true;
+        INFO(static_cast<int>(type));
+        CHECK(w.submit(byer, RouteCommand{}, std::vector<Waypoint>{t0, x, t2}, validate).status == CommandStatus::Valid);
     }
     Waypoint early = t1; // (the end of a path where it goes on is none: 4.36 - not implemented until FA-6e1 built paths)
     early.waypointType = static_cast<double>(WaypointType::EndOfPath);

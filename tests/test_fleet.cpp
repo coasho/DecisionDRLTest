@@ -829,6 +829,70 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         }
     }
 
+    // --- a route that starts on the ground (ADR-29 FA-9d): parked, each wing's route taxies north 150 m and east 200 to its
+    // runway's start, takes off along its runway points 3,000 m north, and flies two points 600 m up, a right turn between -----
+    {
+        fleet.park();
+        constexpr double kStartN = 250.0, kStartE = 200.0, kUpM = 600.0;
+        const std::vector<std::pair<double, double>> taxi = {{0.0, 0.0}, {150.0, 0.0}, {150.0, 200.0}, {kStartN, kStartE}};
+        std::map<std::uint32_t, ActivityId> routed;
+        std::map<std::uint32_t, double> worst, cross, radius, lastLegS;
+        for (const auto& p : planes) {
+            if (p.rotor || w.support(p.id, "fsim.guidance.route/waypoint_type/runway")->support != Support::Supported) continue;
+            INFO(p.type << ": a route from the ground");
+            const double ground = p.start.altitudeMslM - p.start.altitudeAglM;
+            const auto at = [&](double north, double east, WaypointType type) {
+                Waypoint x;
+                x.latitudeRad = p.start.latitudeRad + north / kEarthM;
+                x.longitudeRad = p.start.longitudeRad + east / (kEarthM * std::cos(p.start.latitudeRad));
+                if (type == WaypointType::NavOnly) x.altitudeM = ground + kUpM, x.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+                else x.waypointType = static_cast<double>(type);
+                return x;
+            };
+            const std::vector<Waypoint> route = {at(150.0, 0.0, WaypointType::Taxi), at(150.0, 200.0, WaypointType::Taxi),
+                                                 at(kStartN, kStartE, WaypointType::RunwayStart), at(kStartN + 3000.0, kStartE, WaypointType::RunwayLimit),
+                                                 at(5000.0, kStartE, WaypointType::NavOnly), at(5000.0, 9000.0, WaypointType::NavOnly)};
+            const CommandResult c = w.submit(p.id, RouteCommand{}, Span<const Waypoint>(route.data(), route.size()));
+            INFO(reasonName(c.reason) << " at " << c.index);
+            CHECK(c.accepted());
+            if (!c.accepted()) continue;
+            routed[p.id] = c.activity, worst[p.id] = cross[p.id] = 0.0, lastLegS[p.id] = 0.0;
+            const double tightest = w.profile(p.id)->envelope.groundTurnRadiusM;
+            radius[p.id] = std::max(1.25 * (std::isfinite(tightest) ? tightest : 15.0), 8.0);
+        }
+        // flown until each has flown its last leg a minute (its first point passed, its turn made)
+        const auto done = [&] {
+            for (const auto& [id, a] : routed)
+                if (w.activity(a)->live() && lastLegS[id] < 60.0) return false;
+            return true;
+        };
+        for (double t = 0.0; t < 700.0 && !done(); t += 1.0)
+            fleet.fly(1.0, [&] {
+                for (const auto& [id, a] : routed) {
+                    const auto& s = *w.vehicleState(id);
+                    const auto& p = *std::find_if(planes.begin(), planes.end(), [id = id](const Plane& x) { return x.id == id; });
+                    double north, east;
+                    offset(s, p.start.latitudeRad, p.start.longitudeRad, north, east);
+                    if (s.onGround && north < kStartN - 2.0 && (north > 75.0 || east > 1.0))
+                        worst[id] = std::max(worst[id], taxiPathDistance(taxi, radius[id], north, east));
+                    if (s.onGround && north > kStartN + 20.0) cross[id] = std::max(cross[id], std::abs(east - kStartE));
+                    if (w.activity(a)->progress.segment == 5 && !s.onGround) lastLegS[id] += w.dt() * w.frameSkip();
+                }
+            });
+        for (const auto& p : planes) {
+            if (!routed.count(p.id)) continue;
+            const ActivityRecord& a = *w.activity(routed[p.id]);
+            INFO(p.type << " (" << className(p.cls) << "): a route from the ground " << activityStateName(a.state) << " " << reasonName(a.reason));
+            CHECK((a.state == ActivityState::Active || a.state == ActivityState::Completed));
+            CHECK(worst[p.id] < 2.0);   // (the worst: the U-2S, 1.62 m; the KC-46A 1.27, the B-52H 1.20)
+            CHECK(cross[p.id] < 22.5);  // (the U-2S's 2.73 m; the rest within 0.31)
+            const sim::VehicleState& s = *w.vehicleState(p.id);
+            CHECK(!s.onGround);
+            CHECK(std::abs(s.altitudeMslM - (p.start.altitudeMslM - p.start.altitudeAglM) - kUpM) < 60.0); // at its points' height (598.8 to 607.9 m)
+            fleet.covered(p, "fsim.guidance.route");
+        }
+    }
+
     // --- guidance ------------------------------------------------------------------------------------
     // a new heading, a quarter turn right, and a new altitude: a wing 200 m higher - the fleet climb case (ADR-29
     // FA-3d): energy management keeps its calibrated airspeed at 1.1 times its least or more, where a C172 once

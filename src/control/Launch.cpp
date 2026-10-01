@@ -17,6 +17,7 @@ constexpr double kDeg = 3.14159265358979323846 / 180.0;
 constexpr double kHalfWidthM = 22.5;     // half a 45 m runway (ICAO code letter E: A-GRA's runway gives no width)
 constexpr double kBehindStartM = 60.0;   // on the runway short of its takeoff start: lined up from there
 constexpr double kHeadingOffRad = 30.0 * kDeg;
+constexpr double kLineUpS = 10.0; // lined up so long, it rolls within twice the line-up's offset and heading
 constexpr double kTakeoffFlaps = 0.3;    // the flaps set for the roll and the climb-out, up at kFlapsUpAglM
 constexpr double kRotationShare = 0.6;  // of its angle of attack's limit: lifting off near 1.15 times its least speed
 constexpr double kRotationMinRad = 7.0 * kDeg, kRotationMaxRad = 12.0 * kDeg, kRotationRad = 10.0 * kDeg;
@@ -45,22 +46,19 @@ void onLine(double lat0, double lon0, double course, double lat, double lon, dou
 
 } // namespace
 
-Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState& state, CommandResult& detail) {
+Reason CapabilityHost::takeoffLine(double airfieldId, double runwayId, RouteGround& out, CommandResult& detail) const {
     auto at = [&detail](std::int16_t field, Reason why) {
         detail.index = field;
         return why;
     };
-    // a policy's parameters are its own: what the host writes ("_...": its resolutions, FA's hand-over, 4.50) it cannot
-    // give ('_' to '`', the characters' order)
-    if (policyNew_) b.params.erase(b.params.lower_bound("_"), b.params.lower_bound("`"));
     // its airfield and runway, the vehicle's (4.40); the runway's takeoff line: its start, on its direction (else to its
     // limit), as long as it is (else to its limit)
-    const double af = b.param("airfield", 0.0), rw = b.param("runway", 0.0);
     Airfield a;
-    if (!(af >= 1.0) || af != std::floor(af) || af > 4294967295.0 || !airfield(static_cast<AirfieldId>(af), a)) return at(0, Reason::UnknownAirfield);
+    if (!(airfieldId >= 1.0) || airfieldId != std::floor(airfieldId) || airfieldId > 4294967295.0 || !airfield(static_cast<AirfieldId>(airfieldId), a))
+        return at(0, Reason::UnknownAirfield);
     const Runway* r = nullptr;
     for (const Runway& x : a.runways)
-        if (static_cast<double>(x.id) == rw) r = &x;
+        if (static_cast<double>(x.id) == runwayId) r = &x;
     if (!r) return at(1, Reason::UnknownAirfield);
     const RunwayCoordinates& t = r->takeoff;
     if (isHold(t.start.latitudeRad)) return at(1, Reason::InvalidParameter); // (a runway for landing only)
@@ -70,29 +68,55 @@ Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState
         if (isHold(length)) length = geo::distanceM(t.start.latitudeRad, t.start.longitudeRad, t.limit.latitudeRad, t.limit.longitudeRad);
     }
     if (isHold(course) || isHold(length) || !(length > 0.0)) return at(1, Reason::InvalidParameter);
-    // a wing on the runway: within half its width of the centre line, facing along it, short of its middle - where it
-    // starts; FA's own rejection or continuation of a takeoff a policy canceled (4.50) goes on from wherever it is
+    out.startLatitudeRad = t.start.latitudeRad, out.startLongitudeRad = t.start.longitudeRad;
+    out.courseRad = geo::wrapTwoPi(course), out.lengthM = length, out.airfield = airfieldId, out.runway = runwayId;
+    return Reason::None;
+}
+
+bool CapabilityHost::onRunway(const RouteGround& line, const sim::VehicleState& state) const noexcept {
+    // within half its width of the centre line, facing along it, no more than kBehindStartM short of its start and short of
+    // its middle
     double along, cross;
-    onLine(t.start.latitudeRad, t.start.longitudeRad, course, state.latitudeRad, state.longitudeRad, along, cross);
-    if (!performance_.hovers && b.params.count("_mode") == 0 &&
-        (std::abs(cross) > kHalfWidthM || along < -kBehindStartM || along > 0.5 * length ||
-         std::abs(geo::wrapPi(state.eulerRad[2] - course)) > kHeadingOffRad))
-        return at(1, Reason::InvalidParameter);
+    onLine(line.startLatitudeRad, line.startLongitudeRad, line.courseRad, state.latitudeRad, state.longitudeRad, along, cross);
+    return std::abs(cross) <= kHalfWidthM && along >= -kBehindStartM && along <= 0.5 * line.lengthM &&
+           std::abs(geo::wrapPi(state.eulerRad[2] - line.courseRad)) <= kHeadingOffRad;
+}
+
+bool CapabilityHost::takeoffSpeeds(RouteGround& out) const noexcept {
     // a wing's rotation and climb speeds: 1.1 and 1.3 times its stall speed with its flaps out (else clean; else the
-    // envelope's least - a fly-by-wire fighter's, whose limiter keeps it from stalling)
+    // envelope's least - a fly-by-wire fighter's, whose limiter keeps it from stalling); false with none (a stock model's)
     double stall = kHold;
     if (profile_) stall = std::isfinite(profile_->performance.stallFlapsCasMs) ? profile_->performance.stallFlapsCasMs : profile_->performance.stallCasMs;
     if (!std::isfinite(stall)) stall = performance_.minCasMs;
-    if (!performance_.hovers && !std::isfinite(stall)) return at(1, Reason::NotImplemented); // (no speed to rotate at: a stock model's)
-    b.params["_start_lat"] = t.start.latitudeRad, b.params["_start_lon"] = t.start.longitudeRad;
-    b.params["_course"] = geo::wrapTwoPi(course), b.params["_length"] = length;
-    if (!performance_.hovers) b.params["_vr"] = 1.1 * stall, b.params["_climb"] = 1.3 * stall;
+    if (!std::isfinite(stall)) return false;
+    out.rotationCasMs = 1.1 * stall, out.climbCasMs = 1.3 * stall;
     // its rotation attitude: a share of its angle of attack's limit, kept short of the attitude its tail touches at
     const double alphaMax = profile_ ? profile_->envelope.clean.alphaMaxRad : kHold;
     const double tail = profile_ ? profile_->envelope.groundPitchMaxRad : kHold;
     double rotate = std::isfinite(alphaMax) ? std::clamp(kRotationShare * alphaMax, kRotationMinRad, kRotationMaxRad) : kRotationRad;
     if (std::isfinite(tail)) rotate = std::min(rotate, tail - kTailMarginRad);
-    if (!performance_.hovers) b.params["_rotate"] = rotate;
+    out.rotationRad = rotate;
+    return true;
+}
+
+void LaunchBehavior::write(const RouteGround& g, BehaviorCommand& b) {
+    b.params["_start_lat"] = g.startLatitudeRad, b.params["_start_lon"] = g.startLongitudeRad;
+    b.params["_course"] = g.courseRad, b.params["_length"] = g.lengthM;
+    if (g.rotationCasMs > 0.0) b.params["_vr"] = g.rotationCasMs, b.params["_climb"] = g.climbCasMs, b.params["_rotate"] = g.rotationRad;
+}
+
+Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState& state, CommandResult& detail) {
+    // a policy's parameters are its own: what the host writes ("_...": its resolutions, FA's hand-over, 4.50) it cannot
+    // give ('_' to '`', the characters' order)
+    if (policyNew_) b.params.erase(b.params.lower_bound("_"), b.params.lower_bound("`"));
+    if (b.params.count("_mode") && b.params.count("_start_lat")) return Reason::None; // (FA's own, handed on as resolved: 4.50, 4.52)
+    RouteGround line;
+    if (const Reason why = takeoffLine(b.param("airfield", 0.0), b.param("runway", 0.0), line, detail); why != Reason::None) return why;
+    // a wing on the runway where it starts; FA's own rejection or continuation of a takeoff a policy canceled (4.50) goes on
+    // from wherever it is
+    if (!performance_.hovers && b.params.count("_mode") == 0 && !onRunway(line, state)) return detail.index = 1, Reason::InvalidParameter;
+    if (!performance_.hovers && !takeoffSpeeds(line)) return detail.index = 1, Reason::NotImplemented; // (no speed to rotate at)
+    LaunchBehavior::write(line, b);
     return Reason::None;
 }
 
@@ -119,6 +143,7 @@ void LaunchBehavior::reset() {
     failure_ = Reason::None;
     rotateStartS_ = airborneS_ = lastS_ = rollStartS_ = -1.0;
     crossIntegral_ = settledS_ = pitchIntegral_ = pitchRefRad_ = rotateFromRad_ = accelMs2_ = lastGroundSpeed_ = stoppedS_ = casMs_ = noGoS_ = 0.0;
+    lineUpS_ = 0.0;
     gearUp_ = flapsUp_ = own_ = false;
     onGround_ = true;
 }
@@ -150,6 +175,21 @@ void LaunchBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     }
 }
 
+void LaunchBehavior::startResolved(const ControlContext& ctx, const RouteGround& g, double completeAglM, double hoverAglM) {
+    reset();
+    const auto& s = ctx.sensed;
+    hovers_ = (ctx.features & kFeatureHover) != 0;
+    startLat_ = g.startLatitudeRad, startLon_ = g.startLongitudeRad, courseRad_ = g.courseRad, lengthM_ = g.lengthM;
+    vrCasMs_ = g.rotationCasMs, climbCasMs_ = g.climbCasMs, rotationRad_ = g.rotationCasMs > 0.0 ? g.rotationRad : kRotationRad;
+    completeAglM_ = completeAglM, hoverAglM_ = hoverAglM;
+    groundAglM_ = s.altitudeAglM;
+    hoverMslM_ = s.altitudeMslM - s.altitudeAglM + hoverAglM_;
+    airfield_ = g.airfield, runway_ = g.runway;
+    parkedRad_ = s.eulerRad[1];
+    lastGroundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+    if (hovers_) startLat_ = s.latitudeRad, startLon_ = s.longitudeRad, phase_ = Phase::Lift;
+}
+
 bool LaunchBehavior::canStop(double speedMs) const noexcept {
     return alongM_ + speedMs * kReactionS + speedMs * speedMs / (2.0 * kBrakeMs2) <= lengthM_ - kEndMarginM;
 }
@@ -163,6 +203,9 @@ bool LaunchBehavior::handOver(BehaviorCommand& out) const {
     out.id = "launch";
     out.params = {{"airfield", airfield_}, {"runway", runway_}, {"complete_agl_m", completeAglM_}, {"hover_agl_m", hoverAglM_},
                   {"_mode", stop ? 1.0 : 2.0}, {"_parked", parkedRad_}};
+    // its line and speeds as resolved: a route's runway points name no airfield (4.52)
+    out.params["_start_lat"] = startLat_, out.params["_start_lon"] = startLon_, out.params["_course"] = courseRad_, out.params["_length"] = lengthM_;
+    out.params["_vr"] = vrCasMs_, out.params["_climb"] = climbCasMs_, out.params["_rotate"] = rotationRad_;
     return true;
 }
 
@@ -240,7 +283,11 @@ Command LaunchBehavior::roll(const ControlContext& ctx) {
         a.throttle = std::clamp(0.1 + 0.2 * (5.0 - groundSpeed), 0.0, 0.6);
         a.brakeLeft = a.brakeRight = groundSpeed > 7.0 ? 0.3 : 0.0;
         a.elevator = 0.0;
-        if (std::abs(crossM_) < 2.0 && std::abs(geo::wrapPi(courseRad_ - psi)) < 3.0 * kDeg)
+        // on it within 2 m and 3 deg - after 10 s, 4 m and 6 deg: a light wing weathervaned into a crosswind at a walking pace
+        // (the Skua's 3.3 deg, 3 m off, in 10 m/s) is steered onto its line in the roll
+        lineUpS_ += dt;
+        const double within = lineUpS_ > kLineUpS ? 2.0 : 1.0;
+        if (std::abs(crossM_) < 2.0 * within && std::abs(geo::wrapPi(courseRad_ - psi)) < 3.0 * kDeg * within)
             phase_ = Phase::Roll, pitchRefRad_ = parkedRad_ = theta, rollStartS_ = s.simTime;
         return a;
     }
