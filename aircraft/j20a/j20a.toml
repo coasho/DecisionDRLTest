@@ -298,7 +298,9 @@ retractable_gear = true
 flaps = true
 releasable_stores = "weapons"
 aerobatic = true
-# drag_devices: not declared until a public source for how the type makes drag is recorded; the items it governs stay applicable (docs/flight-autonomy.md, 5.2)
+# drag_devices: not declared - no public source for how the type makes drag was found (its all-moving fins, canards and
+# flaperons are public; their use as an airbrake is not; at Zhuhai it lands on its drag chute): unknowable from public
+# data, the items it governs stay applicable (docs/flight-autonomy.md, 5.2; the backlog's B-11, closed by FA-10e6a)
 
 [applicability.sources]
 vertical_flight = "Public reference works: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"

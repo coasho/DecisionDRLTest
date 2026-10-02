@@ -243,6 +243,23 @@ height = 4.66                 # 15.3 ft
 # 36,000 ft), and is flown to the envelope's Mach 0.6: not calibrated
 operational_ceiling_ft = 60000
 
+# Its drag device (docs/flight-autonomy.md, 4.55): spoilers - the Air Force
+# Flight Test Center's validation of the RQ-4 Block 20's aerodynamic model
+# (C. Eaton and R. Woolf, Society of Flight Test Engineers' 40th symposium,
+# 2009) gives increments for its landing gear, spoilers, ailerons and
+# ruddervators. Where and how far they open is not public: spanned over the
+# wing between its flaps and ailerons, a tenth of its chord, opened 45 deg
+# (estimates). How it uses them in flight is not public either: opened on the
+# runway, not on an approach.
+[[drag_device]]
+name = "spoilers"
+kind = "spoiler"
+surface = "wing"
+span = [0.40, 0.63]
+chord_fraction = 0.1
+hinge = 0.65
+max_deg = 45
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV
@@ -268,9 +285,10 @@ retractable_gear = true
 flaps = true
 releasable_stores = "none"
 aerobatic = false
-# drag_devices: not declared until a public source for how the type makes drag is recorded; the items it governs stay applicable (docs/flight-autonomy.md, 5.2)
+drag_devices = "devices"
 
 [applicability.sources]
+drag_devices = "C. Eaton and R. Woolf, Flight Test Validation of the RQ-4 Block 20 Global Hawk Aerodynamic and Propulsive Models (SFTE, 2009): its model's spoiler increments"
 vertical_flight = "USAF RQ-4 fact sheet: a conventional runway take-off and landing UAV. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
 ground_contact = "USAF RQ-4 fact sheet: tricycle wheeled gear"
 carrier = "USAF RQ-4 fact sheet: a land-based UAV"

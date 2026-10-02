@@ -270,6 +270,17 @@ max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 service_ceiling_ft = 65600
 
+# Its drag device (docs/flight-autonomy.md, 4.55): no dedicated airbrake - "To
+# air-brake, the ailerons deflect up while the flaperons deflect down and the
+# vertical stabilisers toe inward to increase drag" (Aviation Week, on the T-50's
+# innovations, as Wikipedia's Su-57 article cites it): the drag of its fins at
+# 20 deg (their limit) and its ailerons and flaperons at 20 (estimates), their
+# forces cancelling. Opened on an approach.
+[[drag_device]]
+name = "surfaces"
+kind = "surfaces"
+channels = { rudder = 20, aileron = 20 }
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV
@@ -295,9 +306,10 @@ retractable_gear = true
 flaps = true
 releasable_stores = "weapons"
 aerobatic = true
-# drag_devices: not declared until a public source for how the type makes drag is recorded; the items it governs stay applicable (docs/flight-autonomy.md, 5.2)
+drag_devices = "surfaces"
 
 [applicability.sources]
+drag_devices = "Aviation Week (T-50 innovations, cited by Wikipedia's Su-57 article): no airbrake; ailerons up, flaperons down and the vertical stabilisers toed in to air-brake"
 vertical_flight = "United Aircraft Corporation data: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
 ground_contact = "United Aircraft Corporation data: tricycle wheeled gear"
 carrier = "United Aircraft Corporation data: a land-based fighter"

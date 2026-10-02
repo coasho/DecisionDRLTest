@@ -401,7 +401,9 @@ retractable_gear = true
 flaps = true
 releasable_stores = "weapons"
 aerobatic = false
-# drag_devices: not declared. Whether the type has spoilers or airbrakes is for type data to decide (docs/flight-autonomy.md, 5.3)
+# drag_devices: not declared - no public source says whether the type (the Tu-16's airframe) has spoilers or airbrakes; its
+# twin brake parachutes, in the tail cone, are a landing's, not a speedbrake (rule R8): unknowable from public data, the
+# items it governs stay applicable (docs/flight-autonomy.md, 5.2; the backlog's B-11, closed by FA-10e6a)
 
 [applicability.sources]
 vertical_flight = "Wikipedia, Xi'an H-6 (the H-6K, a rebuilt Tu-16 airframe): a conventional take-off and landing jet bomber. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"

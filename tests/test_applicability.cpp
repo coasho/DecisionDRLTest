@@ -191,8 +191,7 @@ TEST_CASE("every design declares its characteristics with their sources, and its
     // stays applicable until a public source decides them.
     const std::map<std::string, std::set<Characteristic>> open = {
         {"gripen", {Characteristic::Flaps}},     {"rafale", {Characteristic::Flaps}},     {"typhoon", {Characteristic::Flaps}},
-        {"h6k", {Characteristic::DragDevices}},  {"j20a", {Characteristic::DragDevices}}, {"rq4b", {Characteristic::DragDevices}},
-        {"su57", {Characteristic::DragDevices}},
+        {"h6k", {Characteristic::DragDevices}},  {"j20a", {Characteristic::DragDevices}}, // (unknowable from public data: B-11)
     };
     auto w = makeWorld();
     std::size_t designs = 0;
