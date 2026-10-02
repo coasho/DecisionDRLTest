@@ -225,6 +225,118 @@ TEST_CASE("recovery: a rotorcraft flies to a hover over the runway and lands str
     }
 }
 
+namespace {
+
+struct Hovered {
+    ActivityState state = ActivityState::Pending;
+    Reason reason = Reason::None;
+    bool touched = false;
+    double fromSpotM = 1e9;    ///< where it touched down, from its spot (60 m beyond the threshold)
+    int goArounds = 0;         ///< times its route began again: its go-arounds
+    double nearestM = 1e9;     ///< to `watch`, horizontally
+};
+
+/// A rotorcraft's recovery to the runway north from (lat0, lon0) flown to its end (1,500 s at most); `calmAfter` its
+/// go-arounds, the wind dropped; `watch` a point it may pass.
+Hovered hover(session::World& w, std::uint32_t id, ActivityId activity, double lat0, double lon0, int calmAfter = 99, double watchLat = 0.0,
+              double watchLon = 0.0) {
+    Hovered out;
+    std::uint32_t segment = 0;
+    for (double t = 0.0; t < 1500.0 && w.activity(activity)->live(); t += 0.1) {
+        w.step(stepsFor(w, 0.1));
+        const sim::VehicleState& s = *w.vehicleState(id);
+        double n, e;
+        offset(s, lat0, lon0, n, e);
+        if (!out.touched && s.onGround) out.touched = true, out.fromSpotM = std::hypot(n - 60.0, e);
+        const std::uint32_t now = w.activity(activity)->progress.segment;
+        if (now < segment && ++out.goArounds == calmAfter) setWind(w, 270.0, 0.0);
+        segment = now;
+        if (watchLat != 0.0) {
+            double north, east;
+            offset(s, watchLat, watchLon, north, east);
+            out.nearestM = std::min(out.nearestM, std::hypot(north, east));
+        }
+    }
+    out.state = w.activity(activity)->state, out.reason = w.activity(activity)->reason;
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("recovery: a rotorcraft in a wind within its limit lands into it on its spot; beyond it, it goes around to its approach "
+          "point, and waved off again fails crosswind_limit, its hover held there; the wind dropped, it lands (RCV-02, 4.66)",
+          "[modes][recovery]") {
+    // the UH-1H's limit is 30 kt (15.4 m/s) from any side: across 13 m/s, facing the runway's course, it turned 64 deg and came
+    // down 160 m off its spot (before 4.66)
+    for (const double wind : {13.0, 20.0}) {
+        for (const int calmAfter : {99, 1}) {
+            if (wind < 15.0 && calmAfter == 1) continue;
+            INFO(wind << " m/s across" << (calmAfter == 1 ? ", dropped after its first go-around" : ""));
+            session::World w(options("recovery-rotor-wind"));
+            setWind(w, 270.0, wind);
+            const auto id = rotor(w, "uh1h");
+            double lat0, lon0, elevation;
+            runwayAhead(w, id, 60.0 * w.performance(id)->cruiseTasMs, lat0, lon0, elevation);
+            const CommandResult r = w.submit(id, recovery());
+            REQUIRE(r.accepted());
+            const Hovered h = hover(w, id, r.activity, lat0, lon0, calmAfter);
+            INFO("went around " << h.goArounds << " times; touched down " << h.fromSpotM << " m from its spot");
+            if (wind < 15.0 || calmAfter == 1) {
+                CHECK(h.state == ActivityState::Completed);
+                CHECK(h.fromSpotM < 6.0); // (13 m/s: 4 m)
+                CHECK(h.goArounds == (wind < 15.0 ? 0 : 1));
+            } else {
+                CHECK(h.state == ActivityState::Failed);
+                CHECK(h.reason == Reason::CrosswindLimit);
+                CHECK(!h.touched);
+                CHECK(h.goArounds == 1); // (its second wave-off ends it at its approach point)
+                const sim::VehicleState& s = *w.vehicleState(id);
+                double n, e;
+                offset(s, lat0, lon0, n, e);
+                CHECK(std::hypot(n + 60.0 * w.performance(id)->cruiseTasMs, e) < 50.0); // over its approach point
+                CHECK(s.altitudeAglM > 50.0);
+            }
+        }
+    }
+}
+
+TEST_CASE("recovery: a rotorcraft going around flies FA's own landing path's chained missed approach before its next approach "
+          "(RCV-03, 4.66)",
+          "[modes][recovery]") {
+    // the UH-60A's limit is 45 kt (23.2 m/s): 26 m/s across
+    session::World w(options("recovery-rotor-missed"));
+    setWind(w, 270.0, 26.0);
+    const auto id = rotor(w, "uh60");
+    double lat0, lon0, elevation;
+    runwayAhead(w, id, 60.0 * w.performance(id)->cruiseTasMs, lat0, lon0, elevation);
+    const auto point = [&](double north, double east, double up) {
+        Waypoint p;
+        p.latitudeRad = lat0 + north / kEarthM, p.longitudeRad = lon0 + east / (kEarthM * std::cos(lat0));
+        p.altitudeM = elevation + up;
+        return p;
+    };
+    RoutePlan plan;
+    plan.id = 82, plan.version = 1;
+    plan.waypoints = {point(-900.0, 0.0, 100.0), point(60.0, 0.0, 10.0), point(800.0, 0.0, 150.0), point(800.0, 600.0, 150.0)};
+    plan.paths = {RoutePath{1, static_cast<double>(PathType::Landing), 0, 2}, RoutePath{2, static_cast<double>(PathType::Primary), 2, 2}};
+    RouteBranch branch;
+    branch.point = 1, branch.next = 2.0;
+    plan.branches = {branch};
+    PathMetadata meta;
+    meta.path = 0, meta.airfield = 7, meta.runway = 3;
+    plan.pathMetadata = {meta};
+    REQUIRE(w.loadPlan(id, plan) == Reason::None);
+    const CommandResult r = w.submit(id, recovery());
+    REQUIRE(r.accepted());
+    const Waypoint& last = plan.waypoints[3];
+    const Hovered h = hover(w, id, r.activity, lat0, lon0, 99, last.latitudeRad, last.longitudeRad);
+    INFO("went around " << h.goArounds << " times; came within " << h.nearestM << " m of the missed approach's last point");
+    CHECK(h.state == ActivityState::Failed);
+    CHECK(h.reason == Reason::CrosswindLimit);
+    CHECK(!h.touched);
+    CHECK(h.nearestM < 30.0);
+}
+
 TEST_CASE("recovery: its NEW names the airfield or runway it cannot use; only in the air; its axes, its configuration, its rollout "
           "handed on (4.53)",
           "[modes][recovery]") {

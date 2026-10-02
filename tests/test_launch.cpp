@@ -299,6 +299,18 @@ TEST_CASE("launch: a wind across the runway beyond the type's limit refused cros
             CHECK(r.accepted());
         }
     }
+    // a rotorcraft's from any side (4.66): the UH-1H's 30 kt (15.4 m/s)
+    for (const double wind : {10.0, 20.0}) {
+        INFO("the UH-1H in " << wind << " m/s");
+        session::World w(options("launch-wind-rotor"));
+        setWind(w, 270.0, wind);
+        const auto id = parked(w, "uh1h");
+        runwayNorth(w, id);
+        w.step(stepsFor(w, 2.0));
+        const CommandResult r = w.submit(id, launch());
+        if (wind > 15.4) CHECK(r.reason == Reason::CrosswindLimit);
+        else CHECK(r.accepted());
+    }
 }
 
 TEST_CASE("launch: an engine lost below its decision speed - the takeoff rejected, stopped on the runway (LCH-02)", "[modes][launch]") {

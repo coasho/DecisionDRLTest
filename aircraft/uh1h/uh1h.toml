@@ -127,6 +127,12 @@ roll_rate_max_deg_s = 60.0
 cas_max_kt = 124.0                 # Vne to 7,500 lb, sea level to 2,000 ft (TM 55-1520-210-10, ch. 5 sec. V,
                                    # as the FAA's TCDS R00005SE repeats it)
 
+[operations]
+# The wind it hovers, lands and lifts in at most, from any side (docs/flight-autonomy.md, 4.66). Source: TM 55-1520-210-10
+# (UH-1H/V operator's manual) as its limitations are summarised in training and simulation material: crosswind and
+# tailwind for hovering 30 kt, sideward and rearward flight 30 kt (the manual itself not seen).
+wind_kt = 30
+
 [targets]
 # TM-73254's flight records (figures 2-9, read from the scans; step sizes measured on the
 # control traces) and the report's model; the fly stage checks the model against them

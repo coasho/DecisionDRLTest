@@ -59,6 +59,12 @@ pitch_min_deg = -30.0
 pitch_max_deg = 30.0
 roll_rate_max_deg_s = 400.0
 
+[operations]
+# The wind it hovers, lands and lifts in at most, from any side (docs/flight-autonomy.md, 4.66). Bitcraze publishes no
+# limit - the Crazyflie is flown indoors - and no flying-qualities requirement covers a small multirotor: the platform's
+# own, measured on the model - the most it is recovered onto its spot within 2.5 m (10 m/s; at 13 m/s 11 m off).
+wind_kt = 19.5
+
 [targets]
 hover_rpm = 14468.0                # GPD's hover rpm (its kf 3.16e-10)
 thrust_to_weight = 2.25            # GPD

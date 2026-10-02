@@ -124,6 +124,12 @@ roll_rate_max_deg_s = 60.0
 cas_max_kt = 193.0                 # "Maximum is 193 Knots": TM 1-1520-237-10 ch. 5 as transcribed at
                                    # oocities.org/ericdurb/limits.htm (Vne falls with altitude, temperature, weight)
 
+[operations]
+# The wind it hovers, lands and lifts in at most, from any side (docs/flight-autonomy.md, 4.66). Source: TM 1-1520-237-10
+# (UH-60A/L operator's manual), ch. 5: "Hovering in winds greater than 45 knots (35 knots with external ERFS) from the
+# sides or rear is prohibited."
+wind_kt = 45
+
 [targets]
 # TM table 4: level flight trim - GENHEL's, the math model the report documents (itself checked
 # against flight tests elsewhere), not flight data; this file's senses (the longitudinal stick negated)

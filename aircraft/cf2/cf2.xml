@@ -132,6 +132,7 @@
     <property value="30">fsim/envelope/clean/pitch_max_deg</property>
     <property value="-30">fsim/envelope/clean/pitch_min_deg</property>
     <property value="400">fsim/envelope/clean/roll_rate_max_deg_s</property>
+    <property value="10.03">fsim/envelope/crosswind_max_ms</property>
     <property value="2">fsim/propulsion/version</property>
     <property value="1">fsim/propulsion/provenance</property>
     <property value="4">fsim/propulsion/engines</property>

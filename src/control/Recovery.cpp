@@ -71,6 +71,11 @@ constexpr double kHoverLeastAglM = 1.5, kHoverMostAglM = 10.0;
 constexpr double kHoverAlongM = 60.0;
 constexpr double kDescentMs = 0.7;            // its vertical descent
 constexpr double kSettledS = 1.0;             // on the ground so long: landed
+// a rotorcraft's go-around (4.66): back at its approach point within this share of its way out (kArrivedLeastM at least) and
+// kArrivedLeastM of its height, still there; its hover and its descent into a wind of kIntoWindMs or more
+constexpr double kArrivedShare = 0.05, kArrivedLeastM = 2.0, kIntoWindMs = 3.0;
+constexpr double kStillMs = 0.5; // ...and it comes down only while moving over the ground slower than this
+constexpr double kGoAroundLeastS = 60.0, kGoAroundShare = 3.0; // its go-around's time to its approach point at most
 // its go-arounds (4.54): an approach not stable below kGateAglM - off the centre line more than kLateralShare of its way to the
 // aim (kLateralLeastM at least), off the glide slope more than kVerticalRad (one dot: kVerticalLeastM at least), slower than
 // its approach speed by kSlowMs or faster by kFastMs, or sinking kSinkMarginMs faster than the slope asks (kSinkLeastMs at
@@ -171,6 +176,39 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
     const double lat0 = line.startLatitudeRad, lon0 = line.startLongitudeRad;
     Waypoint points[4 + kMissedMost];
     RouteCommand laid;
+    auto chainMissed = [&](std::uint32_t first) {
+        // its missed approach (RCV-03; a rotorcraft's too, 4.66): FA's own landing path for this runway - a path of a plan FA
+        // keeps, its type Landing, its airfield and runway these - and the path a branch of it leads to, from where it leads on
+        // to its end, laid after the approach (VI 1.2.6.3: "additional defined Path for missed approach hold procedure, along
+        // with conditional chaining to tie it to the main approach route"). Without one, the circuit back to the approach
+        std::uint32_t count = first;
+        static const std::vector<PlanEntry> kNoPlans;
+        for (const PlanEntry& e : plans_ ? plans_->plans : kNoPlans) {
+            const RoutePlan& p = e.kept;
+            for (std::size_t i = 0; e.faOwned && count == first && i < p.paths.size(); ++i) {
+                const bool here = p.paths[i].type == static_cast<double>(PathType::Landing);
+                bool named = false;
+                for (const PathMetadata& m : p.pathMetadata)
+                    named = named || (m.path == i && static_cast<double>(m.airfield) == line.airfield && static_cast<double>(m.runway) == line.runway);
+                if (!here || !named) continue;
+                const RoutePath& landing = p.paths[i];
+                for (const RouteBranch& branch : p.branches) {
+                    if (count > first || branch.point < landing.first || branch.point >= landing.first + landing.count || !(branch.next >= 0.0)) continue;
+                    const auto next = static_cast<std::uint32_t>(branch.next);
+                    for (const RoutePath& q : p.paths) {
+                        if (&q == &landing || next < q.first || next >= q.first + q.count) continue;
+                        for (std::uint32_t k = next; k < q.first + q.count && k < p.waypoints.size() && count < first + kMissedMost; ++k) {
+                            points[count] = p.waypoints[k];
+                            points[count].next = points[count].terminator = kHold; // (flown in order, its legs straight)
+                            ++count;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        return count;
+    };
     if (performance_.hovers) {
         // a rotorcraft: onto the centre line 1 km out, 100 m up, then to a hover 10 m over the runway, stopped there
         const double speed = orHold(performance_.cruiseTasMs, 10.0);
@@ -180,8 +218,12 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
         points[0] = along(lat0, lon0, course, -out, elevation + std::max(up, hover), speed, static_cast<double>(SpeedReference::GroundSpeed));
         points[1] = along(lat0, lon0, course, kHoverAlongM, elevation + hover, kHold, kHold);
         laid.end = static_cast<double>(EndBehavior::Loiter);
-        if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, 2), state, log); why != Reason::None) return why;
-        b.params["_vapp"] = 0.0, b.params["_aim"] = kHoverAlongM;
+        const std::uint32_t count = chainMissed(2);
+        if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, count), state, log); why != Reason::None) return why;
+        b.params["_vapp"] = 0.0, b.params["_aim"] = kHoverAlongM, b.params["_missed"] = count > 2 ? 2.0 : 0.0;
+        b.params["_app_out"] = out, b.params["_app_msl"] = points[0].altitudeM; // (its go-around's: back to its approach point, 4.66)
+        b.params["_hover_msl"] = points[1].altitudeM;
+        if (profile_ && profile_->identity.family == ControlFamily::Helicopter) b.params["_into_wind"] = 1.0; // (4.66)
     } else {
         // a wing: at its approach speed, 1.3 times its stall (its least: a fly-by-wire fighter's), onto the extended centre line
         // at the intermediate fix, level to the final approach fix, then down the glide slope to its aim on the runway - the
@@ -233,45 +275,17 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
         points[3] = along(lat0, lon0, course, aim, elevation, vapp, cas);
         for (std::uint32_t k = 0; k < 4; ++k) points[k].maxBankRad = kApproachBankRad;
         points[2].kind = points[3].kind = static_cast<double>(EndPointKind::Waypoint); // (flown over: onto the line, down it)
-        // its missed approach (RCV-03): FA's own landing path for this runway - a path of a plan FA keeps, its type Landing, its
-        // airfield and runway these - and the path a branch of it leads to, from where it leads on to its end, laid after the
-        // approach (VI 1.2.6.3: "additional defined Path for missed approach hold procedure, along with conditional chaining to
-        // tie it to the main approach route"). Without one, the circuit back to the approach
-        std::uint32_t count = 4;
-        static const std::vector<PlanEntry> kNoPlans;
-        for (const PlanEntry& e : plans_ ? plans_->plans : kNoPlans) {
-            const RoutePlan& p = e.kept;
-            for (std::size_t i = 0; e.faOwned && count == 4 && i < p.paths.size(); ++i) {
-                const bool here = p.paths[i].type == static_cast<double>(PathType::Landing);
-                bool named = false;
-                for (const PathMetadata& m : p.pathMetadata)
-                    named = named || (m.path == i && static_cast<double>(m.airfield) == line.airfield && static_cast<double>(m.runway) == line.runway);
-                if (!here || !named) continue;
-                const RoutePath& landing = p.paths[i];
-                for (const RouteBranch& branch : p.branches) {
-                    if (count > 4 || branch.point < landing.first || branch.point >= landing.first + landing.count || !(branch.next >= 0.0)) continue;
-                    const auto next = static_cast<std::uint32_t>(branch.next);
-                    for (const RoutePath& q : p.paths) {
-                        if (&q == &landing || next < q.first || next >= q.first + q.count) continue;
-                        for (std::uint32_t k = next; k < q.first + q.count && k < p.waypoints.size() && count < 4 + kMissedMost; ++k) {
-                            points[count] = p.waypoints[k];
-                            points[count].next = points[count].terminator = kHold; // (flown in order, its legs straight)
-                            ++count;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
+        const std::uint32_t count = chainMissed(4);
         if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, count), state, log); why != Reason::None) return why;
         b.params["_vapp"] = vapp, b.params["_aim"] = aim, b.params["_missed"] = count > 4 ? 4.0 : 0.0;
         b.params["_circuit"] = std::max(points[1].altitudeM, elevation + kCircuitLeastAglM);
-        if (profile_ && std::isfinite(profile_->envelope.crosswindMaxMs)) b.params["_xwind"] = profile_->envelope.crosswindMaxMs;
         if (profile_ && std::isfinite(profile_->envelope.gearCasMaxMs)) b.params["_gear_max"] = profile_->envelope.gearCasMaxMs;
         if (profile_ && std::isfinite(profile_->envelope.flaps.casMaxMs))
             b.params["_flaps_max"] = profile_->envelope.flaps.casMaxMs, b.params["_flaps_above"] = profile_->envelope.flapsThreshold;
         if (profile_ && profile_->effectors.speedbrakeApproach) b.params["_sb_air"] = 1.0; // (4.55)
     }
+    // its wind limit (4.54): a wing's across its runway, a rotorcraft's from any side (4.66)
+    if (profile_ && std::isfinite(profile_->envelope.crosswindMaxMs)) b.params["_xwind"] = profile_->envelope.crosswindMaxMs;
     b.params["_thr_lat"] = lat0, b.params["_thr_lon"] = lon0, b.params["_course"] = course, b.params["_length"] = line.lengthM;
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
     b.params.try_emplace("configuration", 0.0); // (its key in place: an UPDATE of it allocates nothing, 4.58)
@@ -293,6 +307,8 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     courseRad_ = b.param("_course", ctx.sensed.eulerRad[2]), lengthM_ = b.param("_length", 2000.0);
     elevationM_ = b.param("_elev", ctx.sensed.altitudeMslM - ctx.sensed.altitudeAglM), vappMs_ = b.param("_vapp", 0.0), aimM_ = b.param("_aim", 0.0);
     tailRad_ = b.param("_tail", kHold), tailWheelRad_ = b.param("_tail_wheel", kHold), vrMs_ = b.param("_vr", 0.0);
+    appOutM_ = b.param("_app_out", 0.0), appMslM_ = b.param("_app_msl", ctx.sensed.altitudeMslM);
+    hoverMslM_ = b.param("_hover_msl", ctx.sensed.altitudeMslM), intoWind_ = b.param("_into_wind", 0.0) != 0.0;
     airfield_ = b.param("airfield", 0.0), runway_ = b.param("runway", 0.0);
     auto& o = std::get<RouteCommand>(options_);
     o = RouteCommand{};
@@ -475,6 +491,7 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
 Command RecoveryBehavior::vertical(const ControlContext& ctx, double dt) {
     const auto& s = ctx.sensed;
     configured_ = true; // (its gear down where it has any)
+    wind_.update(s, dt);
     if (phase_ == Phase::Landed || (phase_ == Phase::Descent && s.onGround && (settledS_ += dt) >= kSettledS)) {
         if (phase_ == Phase::Landed) settledS_ += dt;
         phase_ = Phase::Landed; // on the ground: its collective, its throttle, down
@@ -482,17 +499,77 @@ Command RecoveryBehavior::vertical(const ControlContext& ctx, double dt) {
         down.throttle = 0.0, down.gearDown = 1.0;
         return down;
     }
-    if (phase_ == Phase::Approach) {
+    // its heading in its hover and its descent: a helicopter's into a wind of kIntoWindMs or more, else the runway's (across
+    // 13 m/s the UH-1H, facing the runway's course, turned 64 deg and came down 160 m off its spot; a multirotor, turned, only
+    // drifted the more)
+    const double wind = wind_.valid ? std::hypot(wind_.northMs, wind_.eastMs) : 0.0;
+    const double heading = intoWind_ && wind >= kIntoWindMs ? std::atan2(-wind_.eastMs, -wind_.northMs) : courseRad_;
+    double lat = thrLat_, lon = thrLon_; // (its hover point)
+    geo::offsetLatLon(thrLat_, thrLon_, aimM_ * std::cos(courseRad_), aimM_ * std::sin(courseRad_), lat, lon);
+    if (phase_ == Phase::GoAround) return rotorGoAround(ctx, heading, dt);
+    if (phase_ == Phase::Missed) { // its chained missed approach flown: approaching again, or on its last, failed at its end
         Command out = route_->update(ctx, options_);
         if (!route_->finished()) return out;
+        if (lastApproach_) failed_ = Reason::CrosswindLimit;
+        else approachAgain(ctx, 0);
+        return route_->update(ctx, options_);
+    }
+    // a wind beyond its limit on its approach - on its way to its hover, or coming down from it - for kUnstableS: it goes
+    // around (4.66; checked from its approach point on, the IRIS across 20 m/s never got there, blown 6.5 km downwind)
+    ActivityProgress p;
+    const std::uint32_t flownTo = phase_ == Phase::Approach && route_->progress(p) ? p.segment : 0;
+    if (phase_ == Phase::Descent || phase_ == Phase::Approach) {
+        crosswindS_ = std::isfinite(crosswindMaxMs_) && wind > crosswindMaxMs_ ? crosswindS_ + dt : 0.0;
+        if (crosswindS_ >= kUnstableS) {
+            goAroundFrom(GoAround::Crosswind);
+            goAroundS_ = 0.0;
+            return rotorGoAround(ctx, heading, 0.0);
+        }
+    }
+    if (phase_ == Phase::Approach) {
+        Command out = route_->update(ctx, options_);
+        // (its chained missed approach laid after its hover point: that leg flown to a stop there by position, 4.66)
+        if (missedFrom_ != 0 && flownTo >= 1) {
+            if (std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) > 0.5 || !arrived(s, lat, lon, hoverMslM_, 0.0))
+                return PositionCommand{lat, lon, hoverMslM_, kHold, 1.0, heading};
+        } else if (!route_->finished()) {
+            return out;
+        }
         phase_ = Phase::Descent, descentMslM_ = s.altitudeMslM;
     }
-    // straight down over its hover point, at kDescentMs, to below the ground (the ground stops it)
-    double lat = thrLat_, lon = thrLon_;
-    geo::offsetLatLon(thrLat_, thrLon_, aimM_ * std::cos(courseRad_), aimM_ * std::sin(courseRad_), lat, lon);
+    // straight down over its hover point, at kDescentMs, to below the ground (the ground stops it) - while it is still over
+    // the ground (turned into the wind over its spot, the UH-1H drifted 30 m as it came down)
     if (!s.onGround) settledS_ = 0.0;
-    descentMslM_ = std::max(descentMslM_ - kDescentMs * dt, elevationM_ - 5.0);
-    return PositionCommand{lat, lon, descentMslM_, 2.0, 1.0, courseRad_};
+    if (std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) < kStillMs) descentMslM_ = std::max(descentMslM_ - kDescentMs * dt, elevationM_ - 5.0);
+    return PositionCommand{lat, lon, descentMslM_, 2.0, 1.0, heading};
+}
+
+Command RecoveryBehavior::rotorGoAround(const ControlContext& ctx, double heading, double dt) {
+    // back up to its approach point, its hover held there; arrived, its approach again - its chained missed approach first
+    // where it has one - or, from its last, failed there: the stack's hold keeps its hover (4.66). Not there in
+    // kGoAroundShare times its way out at its cruise (kGoAroundLeastS at least), it fails: the wind beyond what it flies in
+    // (the Crazyflie across 13 m/s, its position held, drifted downwind for 3,000 s)
+    const auto& s = ctx.sensed;
+    goAroundS_ += dt;
+    const double cruise = ctx.performance && ctx.performance->cruiseTasMs > 0.0 ? ctx.performance->cruiseTasMs : 10.0;
+    if (goAroundS_ > std::max(kGoAroundLeastS, kGoAroundShare * appOutM_ / cruise)) failed_ = Reason::CrosswindLimit;
+    double lat = thrLat_, lon = thrLon_;
+    geo::offsetLatLon(thrLat_, thrLon_, -appOutM_ * std::cos(courseRad_), -appOutM_ * std::sin(courseRad_), lat, lon);
+    if (arrived(s, lat, lon, appMslM_, appOutM_) && std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) < kStillMs) {
+        if (lastApproach_) {
+            failed_ = Reason::CrosswindLimit;
+        } else {
+            approachAgain(ctx, missedFrom_);
+            return route_->update(ctx, options_);
+        }
+    }
+    return PositionCommand{lat, lon, appMslM_, kHold, 1.0, heading};
+}
+
+bool RecoveryBehavior::arrived(const sim::VehicleState& s, double lat, double lon, double mslM, double scaleM) const noexcept {
+    double north, east;
+    geo::localNorthEastM(lat, lon, s.latitudeRad, s.longitudeRad, north, east);
+    return std::hypot(north, east) < std::max(kArrivedLeastM, kArrivedShare * scaleM) && std::abs(s.altitudeMslM - mslM) < kArrivedLeastM;
 }
 
 void RecoveryBehavior::reset() { route_->reset(); }
@@ -520,6 +597,10 @@ bool RecoveryBehavior::handOver(BehaviorCommand& out) const {
 }
 
 void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
+    if (phase_ == Phase::GoAround && hovers_) { // (a rotorcraft's gear as it is: 4.66)
+        out.gearDown = 1.0;
+        return;
+    }
     if (phase_ == Phase::GoAround) { // (its flaps a takeoff's, its gear up once it climbs, its brakes off)
         out.flaps = placard(flaps_), out.gearDown = gearUp_ ? 0.0 : 1.0, out.brakeLeft = out.brakeRight = 0.0;
         return;

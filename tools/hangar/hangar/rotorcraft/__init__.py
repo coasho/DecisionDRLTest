@@ -88,6 +88,11 @@ class Rotorcraft:
                 clean["clean/" + field] = float(env[key])
         if "cas_max_kt" in env:
             clean["clean/cas_max_ms"] = float(env["cas_max_kt"]) * KT
+        # the wind it hovers, lands and lifts in at most, from any side: its type's published one, else the platform's own
+        # (docs/flight-autonomy.md, 4.66) - the design's [operations], its source beside it
+        wind = s.get("operations", {}).get("wind_kt")
+        if wind is not None and 0.0 < float(wind) < 200.0:
+            clean["crosswind_max_ms"] = round(float(wind) * KT, 2)
         if clean:
             out["envelope"] = (1, clean)
         if heli:

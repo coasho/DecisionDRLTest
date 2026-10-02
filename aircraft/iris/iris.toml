@@ -54,6 +54,12 @@ pitch_min_deg = -35.0
 pitch_max_deg = 35.0
 roll_rate_max_deg_s = 220.0        # PX4's MC_ROLLRATE_MAX default
 
+[operations]
+# The wind it hovers, lands and lifts in at most, from any side (docs/flight-autonomy.md, 4.66). No limit is published
+# for the IRIS, and no flying-qualities requirement covers a small multirotor (ADS-33E-PRF's 35 kt is a helicopter's): the
+# platform's own, measured - the most it is recovered onto its spot within 2.5 m (13 m/s; at 15 m/s 9.6 m off).
+wind_kt = 25
+
 [targets]
 hover_rads = 793.5                 # sqrt(m g / 4 / motorConstant)
 thrust_to_weight = 1.92

@@ -592,6 +592,8 @@ private:
     Command runway(const ControlContext& ctx, const Command& in, double dt);
     Command vertical(const ControlContext& ctx, double dt);
     Command goAround(const ControlContext& ctx, double alongM, double crossM);
+    Command rotorGoAround(const ControlContext& ctx, double heading, double dt);
+    bool arrived(const sim::VehicleState& s, double lat, double lon, double mslM, double scaleM) const noexcept;
     void goAroundFrom(GoAround cause) noexcept;
     void approachAgain(const ControlContext& ctx, std::uint32_t from);
     std::unique_ptr<RouteBehavior> route_;    ///< flies the approach: allocated with the behaviour
@@ -618,6 +620,9 @@ private:
     double crosswindMaxMs_ = kHold, circuitMslM_ = 0.0, zoneEndM_ = 0.0; ///< its limit; the go-around's altitude; touched down by
     double touchAglM_ = 0.0, unstableS_ = 0.0, crosswindS_ = 0.0;      ///< its height as it touched; how long each has held
     std::uint32_t missedFrom_ = 0;   ///< the approach route's first point of FA's chained missed approach; 0: the circuit
+    double appOutM_ = 0.0, appMslM_ = 0.0, hoverMslM_ = 0.0; ///< a rotorcraft's approach point's way out and height; its hover's (4.66)
+    bool intoWind_ = false; ///< a helicopter's hover and descent into the wind (4.66)
+    double goAroundS_ = 0.0; ///< a rotorcraft's time in its go-around
     std::uint32_t goArounds_ = 0;
     GoAround cause_ = GoAround::None;
     bool gearUp_ = false, lastApproach_ = false, airbrakes_ = false;

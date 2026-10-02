@@ -2597,6 +2597,17 @@ class Profile(unittest.TestCase):
             with open(path, encoding="utf-8") as f:
                 self.assertNotIn("2000-01-01", f.read())
 
+    def test_a_rotorcrafts_wind_limit(self):
+        # the design's [operations] wind_kt - its type's published limit, else the platform's own measured - in the profile's
+        # envelope, in m/s, from any side (docs/flight-autonomy.md, 4.66): the UH-60A's 45 kt, every rotorcraft's given
+        from hangar.rotorcraft import Rotorcraft
+        limits = {}
+        for name in ("cf2", "iris", "uh1h", "uh60"):
+            r = Rotorcraft(repo("aircraft/%s/%s.toml" % (name, name)), log=lambda *a: None)
+            limits[name] = r.profile()["envelope"][1].get("crosswind_max_ms")
+        self.assertEqual(limits["uh60"], 23.15)
+        self.assertTrue(all(v is not None and v > 5.0 for v in limits.values()), limits)
+
     def test_gains_written_by_hand_still_go_into_the_aircraft(self):
         import os
         import tempfile
