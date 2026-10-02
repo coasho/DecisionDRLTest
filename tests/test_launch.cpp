@@ -228,9 +228,11 @@ struct Rejection {
 };
 
 /// A wing's launch on a runway of `lengthM`, disturbed at `share` of its rotation speed: every fuel tank emptied (a flame-out,
-/// its engines starved: `cancel` false) or its launch canceled by its policy; flown until nothing it started is live.
-Rejection rejected(const std::string& type, double share, bool cancel, double lengthM = 3500.0) {
+/// its engines starved: `cancel` false) or its launch canceled by its policy; flown until nothing it started is live. A
+/// crosswind of `windMs` from the west.
+Rejection rejected(const std::string& type, double share, bool cancel, double lengthM = 3500.0, double windMs = 0.0) {
     session::World w(options(("rto-" + type).c_str()));
+    if (windMs > 0.0) setWind(w, 270.0, windMs);
     const auto id = parked(w, type);
     runwayNorth(w, id, lengthM);
     const sim::VehicleState s0 = *w.vehicleState(id);
@@ -315,6 +317,26 @@ TEST_CASE("launch: an engine lost below its decision speed - the takeoff rejecte
     CHECK(shortRunway.reason == Reason::TakeoffRejected);
     CHECK(shortRunway.groundSpeedMs < 0.5);
     CHECK(shortRunway.alongM < 700.0);
+}
+
+TEST_CASE("launch: a tail-wheel aircraft's tail held down on its wheel, which steers it: on its line across its limit (4.65)",
+          "[modes][launch]") {
+    // the U-2S across 7 m/s (its limit 15 kt): before 4.65 its tail rose at 27 m/s, it ran on its single main wheel nose down,
+    // steered by its rudder alone - its takeoff 12.7 m off its line, its rejection 4.7
+    const Takeoff t = takeoff("u2s", 7.0);
+    CHECK(t.state == ActivityState::Completed);
+    CHECK(t.worstCrossM < 3.0); // (1.1 m)
+    const Rejection r = rejected("u2s", 0.6, true, 3500.0, 7.0);
+    REQUIRE(r.own != 0);
+    CHECK(r.ownState == ActivityState::Completed);
+    CHECK(r.groundSpeedMs < 0.5);
+    CHECK(r.worstCrossM < 3.0); // (1.7 m)
+    // an engine lost: stopped on its runway, its line held calm (1.7 m); across 7 m/s its failure judged 3.5 s after it, the
+    // tail light, it runs 15 m off (a finding: docs/flight-autonomy.md, B-8)
+    const Rejection lost = rejected("u2s", 0.6, false);
+    CHECK(lost.reason == Reason::TakeoffRejected);
+    CHECK(lost.groundSpeedMs < 0.5);
+    CHECK(lost.worstCrossM < 3.0);
 }
 
 TEST_CASE("launch: a policy's CANCEL on the runway - FA stops it below its decision speed, flies it off above (LCH-02)", "[modes][launch]") {

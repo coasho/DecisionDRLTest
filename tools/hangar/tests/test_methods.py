@@ -1579,6 +1579,16 @@ class GroundGeometry(unittest.TestCase):
         e7a = jsbsim.tail_down_deg(Aircraft.load(repo("aircraft/e7a/e7a.toml")))
         self.assertTrue(6.0 < e7a < 8.5, e7a)
 
+    def test_a_tail_wheels_two_point_attitude(self):
+        # on its main and tail wheels together, the struts at their static deflection: the test gear's main wheel at -1.5,
+        # its tail wheel at -1.0 6 m behind it, 4.76 deg; the library's U-2S's 4.0 (NASA: parked 4 deg nose high); a
+        # tricycle has none (4.65)
+        from hangar import jsbsim
+        self.assertAlmostEqual(jsbsim.tail_wheel_deg(Aircraft(BicycleGear.u2())), math.degrees(math.atan2(0.5, 6.0)), places=9)
+        u2s = jsbsim.tail_wheel_deg(Aircraft.load(repo("aircraft/u2s/u2s.toml")))
+        self.assertTrue(3.9 < u2s < 4.1, u2s)
+        self.assertIsNone(jsbsim.tail_wheel_deg(Aircraft.load(repo("aircraft/c172/c172.toml"))))
+
     def test_the_tightest_turn_on_its_wheels(self):
         # geometric: its wheelbase over the tangent of its steering limit (the U-2's 6 m to its tail wheel, 10 deg); flown,
         # its tyres' - the ground stage's, the profile's where it has flown it (4.51)
@@ -1601,6 +1611,8 @@ class GroundGeometry(unittest.TestCase):
         self.assertEqual((p["envelope"]["ground_pitch_max_deg"], p["envelope"]["ground_turn_radius_m"], p["envelope"]["ground_yaw_accel_rad_s2"]),
                          (15.0, 6.7, 0.6987))
         self.assertNotIn("ground_turn_radius_m", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
+        self.assertNotIn("tail_wheel_pitch_deg", p["envelope"])
+        self.assertEqual(sections(Profile().fighter(), {"options": {}}, {}, {}, {}, tail_wheel=3.994)["envelope"]["tail_wheel_pitch_deg"], 3.99)
 
     def test_the_profile_carries_its_crosswind_limit(self):
         # the design's [operations] crosswind_kt, in m/s (4.54); none given, none written

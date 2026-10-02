@@ -1015,6 +1015,7 @@ struct RouteGround {
     double startLatitudeRad = 0.0, startLongitudeRad = 0.0, courseRad = 0.0, lengthM = 0.0;
     double rotationCasMs = 0.0, climbCasMs = 0.0, rotationRad = 0.0, airfield = 0.0, runway = 0.0;
     double elevationM = 0.0; ///< a landing line's: its threshold's (4.53)
+    double tailWheelRad = kHold; ///< a tail-wheel aircraft's attitude on its main and tail wheels (4.65); NaN: not one
 };
 
 struct RouteLanding; // below: a route's landing at its end (4.59)

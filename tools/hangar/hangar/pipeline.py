@@ -608,7 +608,7 @@ class Design:
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
         profile = sections(a, fbw, reference, identified, fly_results(self.dir), performance_tables(self.dir),
-                           tail_down=jsbsim.tail_down_deg(a), turn_radius=(self.load("ground") or {}).get("turn_radius_m", jsbsim.turn_radius_m(a)),
+                           tail_down=jsbsim.tail_down_deg(a), tail_wheel=jsbsim.tail_wheel_deg(a), turn_radius=(self.load("ground") or {}).get("turn_radius_m", jsbsim.turn_radius_m(a)),
                            yaw_accel=(self.load("ground") or {}).get("yaw_accel_rad_s2"))
         text = keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:

@@ -42,6 +42,7 @@ constexpr double kFastShare = 1.08;           // down the slope faster than this
 // they flared late, onto their tails' limit, and touched down at up to 3.55 m/s (4.60)
 constexpr double kFlareS = 5.0;
 constexpr double kFlareSinkMs = 0.6;
+constexpr double kTailWheelShare = 1.1; // ...its approach speed this share of its stall in its landing configuration
 constexpr double kFlareKp = 1.5 * kDeg, kFlareKi = 0.6 * kDeg; // its pitch on the sink's error: per m/s, and per m/s a second
 constexpr double kFlareMostRad = 8.0 * kDeg;  // its pitch raised no more than this, nor to 2 deg short of its tail's touching
 constexpr double kTailMarginRad = 2.0 * kDeg;
@@ -192,7 +193,7 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
         // lands at (the KC-135R 178 kt against 130 to 140)
         double vapp = line.climbCasMs;
         if (profile_) {
-            const double landing = 1.3 * profile_->performance.stallFlapsCasMs;
+            const double landing = (std::isfinite(line.tailWheelRad) ? kTailWheelShare : 1.3) * profile_->performance.stallFlapsCasMs;
             if (landing < vapp && !(landing > profile_->envelope.flaps.casMaxMs)) vapp = landing;
             if (profile_->performance.approachCasMs > 0.0) vapp = profile_->performance.approachCasMs;
         }
@@ -275,6 +276,8 @@ Reason CapabilityHost::layRecovery(BehaviorCommand& b, RouteGround line, const s
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
     b.params.try_emplace("configuration", 0.0); // (its key in place: an UPDATE of it allocates nothing, 4.58)
     if (profile_ && std::isfinite(profile_->envelope.groundPitchMaxRad)) b.params["_tail"] = profile_->envelope.groundPitchMaxRad;
+    if (profile_ && std::isfinite(profile_->envelope.tailWheelPitchRad)) b.params["_tail_wheel"] = profile_->envelope.tailWheelPitchRad;
+    if (line.rotationCasMs > 0.0) b.params["_vr"] = line.rotationCasMs; // (its rollout's: where it would fly, 4.65)
     return Reason::None;
 }
 
@@ -289,7 +292,7 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     thrLat_ = b.param("_thr_lat", ctx.sensed.latitudeRad), thrLon_ = b.param("_thr_lon", ctx.sensed.longitudeRad);
     courseRad_ = b.param("_course", ctx.sensed.eulerRad[2]), lengthM_ = b.param("_length", 2000.0);
     elevationM_ = b.param("_elev", ctx.sensed.altitudeMslM - ctx.sensed.altitudeAglM), vappMs_ = b.param("_vapp", 0.0), aimM_ = b.param("_aim", 0.0);
-    tailRad_ = b.param("_tail", kHold);
+    tailRad_ = b.param("_tail", kHold), tailWheelRad_ = b.param("_tail_wheel", kHold), vrMs_ = b.param("_vr", 0.0);
     airfield_ = b.param("airfield", 0.0), runway_ = b.param("runway", 0.0);
     auto& o = std::get<RouteCommand>(options_);
     o = RouteCommand{};
@@ -384,7 +387,7 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
     if (s.onGround) { // touched down: the rollout - idle, its brakes, steered onto the centre line, its nose down, to a stop
         RouteGround line;
         line.startLatitudeRad = thrLat_, line.startLongitudeRad = thrLon_, line.courseRad = courseRad_, line.lengthM = lengthM_;
-        line.airfield = airfield_, line.runway = runway_;
+        line.airfield = airfield_, line.runway = runway_, line.tailWheelRad = tailWheelRad_, line.rotationCasMs = vrMs_;
         rollout_->startRollout(ctx, line);
         phase_ = Phase::Rollout, touchAglM_ = s.altitudeAglM;
         return rollout_->update(ctx, in);

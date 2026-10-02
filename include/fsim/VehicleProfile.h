@@ -104,6 +104,9 @@ struct EnvelopeSection {
     double gearCasMaxMs = kUnknown;
     /// On its wheels: the pitch attitude its tail touches at, pivoting on its aftmost wheels (a launch rotates short of it).
     double groundPitchMaxRad = kUnknown;
+    /// On its wheels, a tail-wheel aircraft's: the pitch attitude it rests at on its main and tail wheels together (its
+    /// two-point landing's, docs/flight-autonomy.md 4.65). Unknown for any other.
+    double tailWheelPitchRad = kUnknown;
     /// On its wheels: its tightest turn, m, at the main wheels' middle (a taxi's corners are drawn wider).
     double groundTurnRadiusM = kUnknown;
     /// On its wheels: the yaw acceleration its steering gives it, full over, rad/s^2 - how quickly a turn there builds (a

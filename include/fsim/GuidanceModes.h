@@ -602,6 +602,8 @@ private:
     double thrLat_ = 0.0, thrLon_ = 0.0, courseRad_ = 0.0, lengthM_ = 0.0, elevationM_ = 0.0, vappMs_ = 0.0, aimM_ = 0.0;
     double airfield_ = 0.0, runway_ = 0.0, settledS_ = 0.0, lastS_ = -1.0, descentMslM_ = 0.0;
     double tailRad_ = kHold, flarePitchRad_ = 0.0, flareIntegral_ = 0.0; ///< its tail's touching attitude; its flare's
+    double tailWheelRad_ = kHold; ///< a tail-wheel aircraft's attitude on its main and tail wheels (4.65); NaN: not one
+    double vrMs_ = 0.0;           ///< its rotation speed (calibrated): its rollout's, where it would fly again
     double speedAddMs_ = 0.0; ///< its approach speed's change for the attitude it comes down at (calibrated)
     double flaps_ = 1.0;      ///< its flaps for landing, eased for that attitude
     double speedbrake_ = 0.0; ///< its drag devices down the glide slope (4.55)

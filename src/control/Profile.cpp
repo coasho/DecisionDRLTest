@@ -83,6 +83,7 @@ const Field kFields[] = {
     {"envelope", "flaps_threshold", Kind::Real, 0, 1, 1, AT(envelope.flapsThreshold)},
     {"envelope", "gear_cas_max_ms", Kind::Real, 0, 2000, 1, AT(envelope.gearCasMaxMs)},
     {"envelope", "ground_pitch_max_deg", Kind::Real, 0, 90, kDeg, AT(envelope.groundPitchMaxRad)},
+    {"envelope", "tail_wheel_pitch_deg", Kind::Real, 0, 45, kDeg, AT(envelope.tailWheelPitchRad)},
     {"envelope", "ground_turn_radius_m", Kind::Real, 0, 1000, 1, AT(envelope.groundTurnRadiusM)},
     {"envelope", "ground_yaw_accel_rad_s2", Kind::Real, 0, 100, 1, AT(envelope.groundYawAccelRadS2)},
     {"envelope", "crosswind_max_ms", Kind::Real, 0, 100, 1, AT(envelope.crosswindMaxMs)},

@@ -445,6 +445,7 @@ private:
     double vrCasMs_ = 0.0, climbCasMs_ = 0.0, completeAglM_ = 450.0, hoverAglM_ = 10.0, groundAglM_ = 0.0, hoverMslM_ = 0.0;
     double rotateStartS_ = -1.0, airborneS_ = -1.0, pitchRefRad_ = 0.0, rotationRad_ = 0.0, rotateFromRad_ = 0.0, pitchIntegral_ = 0.0;
     double crossIntegral_ = 0.0;
+    double tailWheelRad_ = kHold; ///< a tail-wheel aircraft's attitude on its main and tail wheels (4.65); NaN: not one
     double lastS_ = -1.0;
     double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0, lineUpS_ = 0.0;
     bool gearUp_ = false, flapsUp_ = false;

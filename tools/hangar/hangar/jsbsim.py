@@ -354,6 +354,21 @@ def tail_down_deg(aircraft):
     return min(angles) if angles else None
 
 
+def tail_wheel_deg(aircraft):
+    """A tail-wheel aircraft's pitch attitude (deg, nose up) on its main and tail
+    wheels together, the struts at their static deflection: the attitude it is
+    parked at and lands on (docs/flight-autonomy.md, 4.65; the U-2S's 4.0 deg,
+    NASA's "parked 4 deg nose high"). Its tail wheels: the steerable ones behind
+    every other wheel. None for any other layout."""
+    wheels = [(g, pos + np.array([0.0, 0.0, g.static_deflection])) for g in aircraft.gear for _, pos in g.positions()]
+    tail = [p for g, p in wheels if g.steerable]
+    main = [p for g, p in wheels if not g.steerable]
+    if not tail or not main or min(p[0] for p in tail) <= max(p[0] for p in main):
+        return None
+    t, m = np.mean(tail, axis=0), np.mean(main, axis=0)
+    return math.degrees(math.atan2(t[2] - m[2], t[0] - m[0]))
+
+
 def turn_radius_m(aircraft):
     """The tightest turn on its wheels (m), at the main wheels' middle: the wheelbase
     from the steerable wheel(s) to the others over the tangent of its steering limit.

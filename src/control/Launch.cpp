@@ -33,7 +33,16 @@ constexpr double kGearUpAglM = 10.0, kFlapsUpAglM = 120.0;
 constexpr double kReactionS = 1.0, kBrakeMs2 = 2.5, kEndMarginM = 30.0, kRotateS = 5.0, kLineLostM = 11.25;
 constexpr double kJudgeFromShare = 0.3, kJudgeAfterS = 40.0, kNoGoS = 1.0;
 constexpr double kStoppedMs = 0.3; // stopped: slower than this for a second
-constexpr double kDerotateRadS = 2.0 * kDeg; // a landing's nose lowered so fast onto its nose wheel (4.53)
+constexpr double kDerotateRadS = 2.0 * kDeg; // a landing's nose lowered so fast onto its nose wheel (4.53)...
+constexpr double kDerotateMostS = 3.0;         // ...or faster, down within this (4.65: the MiG-29A, landed 13.6 deg nose up,
+                                               // steered on its rudder alone 7 s and ran 7 m off its line across 10 m/s)
+constexpr double kTailBrakeFromRad = 0.1 * kDeg, kTailBrakeRad = 0.25 * kDeg; // a tail wheel's brakes: on from this under its
+                                                                                // two-point attitude, all on over this more (4.65)
+constexpr double kTailLostM = 4.0;            // ...and all on, its tail wheel's grip or not, once it is this far off its line
+constexpr double kTailHoldIntegral = 0.6;     // ...then its attitude's hold begun from its stick near full back
+constexpr double kTailPressShare = 0.85;      // ...its stick full back below this share of its rotation speed (faster, it flies)
+constexpr double kTailWingsGain = 6.0;        // its wings flown level on its single main wheel (4.65)
+constexpr double kTailSteerGain = 8.0, kTailYawDamping = 4.0; // its steering's gains on its line and its yaw rate (4.65)
 
 double clamp1(double x) noexcept { return std::clamp(x, -1.0, 1.0); }
 
@@ -98,6 +107,7 @@ bool CapabilityHost::takeoffSpeeds(RouteGround& out) const noexcept {
     double rotate = std::isfinite(alphaMax) ? std::clamp(kRotationShare * alphaMax, kRotationMinRad, kRotationMaxRad) : kRotationRad;
     if (std::isfinite(tail)) rotate = std::min(rotate, tail - kTailMarginRad);
     out.rotationRad = rotate;
+    out.tailWheelRad = profile_ ? profile_->envelope.tailWheelPitchRad : kHold;
     return true;
 }
 
@@ -105,6 +115,7 @@ void LaunchBehavior::write(const RouteGround& g, BehaviorCommand& b) {
     b.params["_start_lat"] = g.startLatitudeRad, b.params["_start_lon"] = g.startLongitudeRad;
     b.params["_course"] = g.courseRad, b.params["_length"] = g.lengthM;
     if (g.rotationCasMs > 0.0) b.params["_vr"] = g.rotationCasMs, b.params["_climb"] = g.climbCasMs, b.params["_rotate"] = g.rotationRad;
+    if (std::isfinite(g.tailWheelRad)) b.params["_tail_wheel"] = g.tailWheelRad;
 }
 
 Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState& state, CommandResult& detail) {
@@ -166,6 +177,7 @@ void LaunchBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     hoverMslM_ = s.altitudeMslM - s.altitudeAglM + hoverAglM_; // (the c.g. that high over the ground it stands on)
     airfield_ = command.param("airfield", 0.0), runway_ = command.param("runway", 0.0);
     parkedRad_ = command.param("_parked", s.eulerRad[1]);
+    tailWheelRad_ = command.param("_tail_wheel", kHold);
     lastGroundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (hovers_) startLat_ = s.latitudeRad, startLon_ = s.longitudeRad, phase_ = Phase::Lift; // (straight up, from where it is)
     // FA's own, handed on from a takeoff a policy canceled on the runway (4.50): its rejection, or its continuation - rolling
@@ -190,16 +202,18 @@ void LaunchBehavior::startResolved(const ControlContext& ctx, const RouteGround&
     groundAglM_ = s.altitudeAglM;
     hoverMslM_ = s.altitudeMslM - s.altitudeAglM + hoverAglM_;
     airfield_ = g.airfield, runway_ = g.runway;
-    parkedRad_ = s.eulerRad[1];
+    parkedRad_ = s.eulerRad[1], tailWheelRad_ = g.tailWheelRad;
     lastGroundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (hovers_) startLat_ = s.latitudeRad, startLon_ = s.longitudeRad, phase_ = Phase::Lift;
 }
 
 void LaunchBehavior::startRollout(const ControlContext& ctx, const RouteGround& line) {
     startResolved(ctx, line, completeAglM_, hoverAglM_);
-    // its nose lowered from where it touched down at kDerotateRadS onto its nose wheel, level - its brakes once it is there
-    own_ = true, phase_ = Phase::Reject, derotating_ = true;
-    parkedRad_ = std::max(ctx.sensed.eulerRad[1], 0.0), pitchRefRad_ = parkedRad_, rollStartS_ = ctx.sensed.simTime;
+    // its nose lowered from where it touched down at kDerotateRadS onto its nose wheel, level - its brakes once it is there;
+    // a tail-wheel aircraft's tail held down on its wheel instead, its attitude on both (4.65)
+    own_ = true, phase_ = Phase::Reject, derotating_ = !std::isfinite(tailWheelRad_);
+    parkedRad_ = derotating_ ? std::max(ctx.sensed.eulerRad[1], 0.0) : tailWheelRad_;
+    pitchRefRad_ = rotateFromRad_ = parkedRad_, rollStartS_ = ctx.sensed.simTime;
 }
 
 bool LaunchBehavior::canStop(double speedMs) const noexcept {
@@ -215,6 +229,7 @@ bool LaunchBehavior::handOver(BehaviorCommand& out) const {
     out.id = "launch";
     out.params = {{"airfield", airfield_}, {"runway", runway_}, {"complete_agl_m", completeAglM_}, {"hover_agl_m", hoverAglM_},
                   {"_mode", stop ? 1.0 : 2.0}, {"_parked", parkedRad_}};
+    if (std::isfinite(tailWheelRad_)) out.params["_tail_wheel"] = tailWheelRad_;
     // its line and speeds as resolved: a route's runway points name no airfield (4.52)
     out.params["_start_lat"] = startLat_, out.params["_start_lon"] = startLon_, out.params["_course"] = courseRad_, out.params["_length"] = lengthM_;
     out.params["_vr"] = vrCasMs_, out.params["_climb"] = climbCasMs_, out.params["_rotate"] = rotationRad_;
@@ -247,6 +262,9 @@ double LaunchBehavior::steer(const sim::VehicleState& s, double dt) {
     if (phase_ != Phase::LineUp) crossIntegral_ = std::clamp(crossIntegral_ + crossM_ * dt, -200.0, 200.0);
     const double ahead = phase_ == Phase::LineUp ? 20.0 : 60.0;
     const double err = geo::wrapPi(courseRad_ - std::atan2(crossM_ + 0.1 * crossIntegral_, ahead) - s.eulerRad[2]);
+    // (a tail-wheel aircraft's harder, its yaw damped harder: landed crabbed, on its main wheel its rudder alone answers - at
+    // the nose wheels' gains the U-2S weathervaned 16 m off its line - and its tail wheel, once down, bites, 4.65)
+    if (std::isfinite(tailWheelRad_)) return clamp1(-kTailSteerGain * err + kTailYawDamping * s.angularRateBodyRadS[2]);
     return clamp1(-2.0 * err + 0.5 * s.angularRateBodyRadS[2]);
 }
 
@@ -260,7 +278,7 @@ Command LaunchBehavior::reject(const ControlContext& ctx) {
     a.throttle = 0.0, a.brakeLeft = a.brakeRight = 1.0;
     a.gearDown = 1.0, a.flaps = kTakeoffFlaps;
     if (derotating_) { // (a landing's rollout: its nose lowered first, its brakes off until it is down - 4.53)
-        parkedRad_ = std::max(parkedRad_ - kDerotateRadS * dt, 0.0);
+        parkedRad_ = std::max(parkedRad_ - std::max(kDerotateRadS, rotateFromRad_ / kDerotateMostS) * dt, 0.0);
         if (parkedRad_ <= 0.0) derotating_ = false; // (down: the B-52H rests on its bicycle gear 1 deg nose up)
         else a.brakeLeft = a.brakeRight = 0.0;
     }
@@ -269,9 +287,19 @@ Command LaunchBehavior::reject(const ControlContext& ctx) {
     // its nose held at its parked attitude: down only - a tricycle's nose wheel kept loaded to steer, its strut's give
     // allowed - unless it pitches onto its nose, more than 2 deg under (braking the U-2S's single main wheel lifted its tail
     // wheel, and it turned 37 deg off its line across the wind)
-    pitchRefRad_ = parkedRad_;
+    pitchRefRad_ = std::isfinite(tailWheelRad_) ? tailWheelRad_ : parkedRad_;
     const double hold = pitchHold(s.eulerRad[1], s.angularRateBodyRadS[1], dt, true);
-    if (s.eulerRad[1] < parkedRad_ - 2.0 * kDeg) {
+    if (std::isfinite(tailWheelRad_)) {
+        // a tail-wheel aircraft (4.65): its tail held down on its wheel, which steers it - up elevator only - and its brakes
+        // only while it is down (braked, the U-2S's single main wheel ahead of its CG lifted its tail, and it ran 26 m off
+        // its line across 7 m/s on its rudder alone)
+        a.elevator = casMs_ < kTailPressShare * vrCasMs_ ? -1.0 : std::min(hold, 0.0);
+        a.aileron = clamp1(-kTailWingsGain * s.eulerRad[0] - s.angularRateBodyRadS[0]);
+        a.flaps = 0.0; // (its flaps up: their lift and nose-down moment unloaded its tail wheel stopping from 29 m/s)
+        pitchIntegral_ = std::max(pitchIntegral_, 0.0);
+        const double brake = std::abs(crossM_) > kTailLostM ? 1.0 : std::clamp((s.eulerRad[1] - (tailWheelRad_ - kTailBrakeFromRad)) / kTailBrakeRad, 0.0, 1.0);
+        a.brakeLeft = std::min(a.brakeLeft, brake), a.brakeRight = std::min(a.brakeRight, brake);
+    } else if (s.eulerRad[1] < parkedRad_ - 2.0 * kDeg) {
         a.elevator = hold;
     } else {
         a.elevator = std::max(hold, 0.0);
@@ -326,8 +354,18 @@ Command LaunchBehavior::roll(const ControlContext& ctx) {
     if (phase_ == Phase::Roll) {
         // the nose held down at its parked attitude until the rotation speed (a pitch-up of its own - engines under the
         // wing, the flaps: the E-7A's at 45 m/s - sat it on its tail): nose-down elevator only, its integral too
-        a.elevator = std::max(pitchHold(theta, q, dt, true), 0.0);
-        pitchIntegral_ = std::min(pitchIntegral_, 0.0);
+        if (!std::isfinite(tailWheelRad_)) {
+            a.elevator = std::max(pitchHold(theta, q, dt, true), 0.0);
+            pitchIntegral_ = std::min(pitchIntegral_, 0.0);
+        } else if (s.airspeedCalibratedMs < kTailPressShare * vrCasMs_) {
+            // a tail-wheel aircraft's tail held down on its wheel, its stick full back, then its attitude held both ways from
+            // there to its rotation (4.65): on nose-down elevator only the U-2S's tail rose at 27 m/s and it ran on its main
+            // wheel 9 deg nose down, steered by its rudder alone; its stick full back to its rotation, it flew off at 44 m/s
+            // and stalled; eased at once, it hopped off its wheels
+            a.elevator = -1.0, pitchIntegral_ = kTailHoldIntegral;
+        } else {
+            a.elevator = pitchHold(theta, q, dt, true);
+        }
         // and, too slow for the elevator, by easing the thrust as the nose rises past a degree over it (a thrust line
         // under the CG: the Su-25's rocked it back onto its tail at a walking pace)
         a.throttle = std::clamp(1.0 - 0.35 * (theta - pitchRefRad_ - kDeg) / kDeg, 0.3, 1.0);
