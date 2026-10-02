@@ -3028,6 +3028,13 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                     CHECK(std::abs(w.vehicleState(p.id)->altitudeMslM - p.start.altitudeMslM) < 100.0); // (the worst: 34 m)
                 } else {
                     CHECK((r.state == ActivityState::Completed || (r.state == ActivityState::Failed && r.reason == Reason::BehaviorFailed)));
+                    // given up, flying again (4.64; before it the EA-18G sank in a deep stall to the ground at 31 m/s): the
+                    // A-10C 312 m over its start, the EA-18G 345 m under it; the fly-by-wire fighters given up slow still
+                    // descending at up to 17 m/s to their entry's height
+                    const auto& s = *w.vehicleState(p.id);
+                    INFO("at the end " << s.altitudeMslM - p.start.altitudeMslM << " m from its start, at " << s.airspeedCalibratedMs << " m/s");
+                    CHECK(s.altitudeMslM > p.start.altitudeMslM - 1000.0);
+                    CHECK(!(s.airspeedCalibratedMs < p.minCasMs));
                 }
             },
             roll);

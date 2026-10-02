@@ -18,6 +18,10 @@ namespace {
 
 constexpr double kG = 9.80665;
 constexpr double kThrottleStopShare = 0.005; // a throttle this near idle or full: stopped against it (anti-windup, 4.63)
+// an aerobatic manoeuvre given up and departed, its recovery (4.64): its nose this far down, its wings level (its bank
+// held within this), until its angle of attack is this far within its envelope's and its speed this share of its least
+constexpr double kRecoverPitchRad = 10.0 * units::kPi / 180.0, kRecoverBankRad = 0.785, kRecoverMarginRad = 5.0 * units::kPi / 180.0;
+constexpr double kRecoverShare = 1.5;
 
 double clamp11(double v) noexcept { return std::clamp(v, -1.0, 1.0); }
 
@@ -783,13 +787,34 @@ Command AerobaticBehavior::update(const ControlContext& ctx, const Command&) {
     // flown within the envelope, or not at all: too slow, departed (its angle of attack past the
     // envelope's by more than a limiter overshoots, either way), or too near the ground, it gives up and levels out
     const bool departed = std::isfinite(alphaMaxRad_) && std::abs(s.alphaRad) > alphaMaxRad_ + 0.0524;
-    if ((phase_ == Pull || phase_ == Roll) &&
-        ((std::isfinite(minCasMs_) && s.airspeedCalibratedMs < minCasMs_) || departed || s.altitudeAglM < 150.0)) {
+    const bool slow = std::isfinite(minCasMs_) && s.airspeedCalibratedMs < minCasMs_;
+    if ((phase_ == Pull || phase_ == Roll) && (slow || departed || s.altitudeAglM < 150.0)) {
         failed_ = true;
         phase_ = Done;
     }
+    // departed - as it gives up, or levelling out after it - it recovers before it levels out (docs/flight-autonomy.md,
+    // 4.64); too near the ground, it levels out at once. Given up slow, and not departed, it levels out at once: recovered
+    // first, the fighters that floated over their loops' tops below their least airspeed came out 400 to 760 m lower
+    if (phase_ == Done && failed_ && departed && s.altitudeAglM >= 150.0) phase_ = Recover;
+    if (phase_ == Recover) {
+        // unloaded, its wings level and its nose kRecoverPitchRad down, its throttle at idle, as an upset's recovery has it
+        // (a thrust line under its CG pitches it up: given full power once its angle of attack was back within, the EA-18G
+        // departed again) - until it flies again: its angle of attack back within, kRecoverShare of its least speed.
+        // Levelled out at its entry's speed and height at once, the EA-18G, over the top of its loop at 58 m/s, lit its
+        // afterburner and climbed into a deep stall at 50 deg, sinking 70 m/s to the ground
+        const bool flying = (!std::isfinite(alphaMaxRad_) || std::abs(s.alphaRad) < alphaMaxRad_ - kRecoverMarginRad) &&
+                            (!std::isfinite(minCasMs_) || s.airspeedCalibratedMs > kRecoverShare * minCasMs_);
+        if (!flying) return AttitudeCommand{0.0, -kRecoverPitchRad, kHold, kRecoverBankRad, 0.0, kHold};
+        // then level where it recovered, along its heading then, back to its entry's speed: climbed back to its entry's height
+        // at once, the EA-18G departed again; turned back to its entry's heading at 95 m/s, its afterburner lit, it departed again
+        entryAltitude_ = s.altitudeMslM;
+        entryHeading_ = geo::wrapTwoPi(s.eulerRad[2] - (manoeuvre_ == Immelmann || manoeuvre_ == SplitS ? units::kPi : 0.0));
+        phase_ = Done;
+    }
     AccelerationCommand out;
-    out.throttle = 1.0;
+    // a split-S at idle, as one is flown (4.64): at full power the fighters' gained speed on the way down until half a loop
+    // at 3.5 g needed more height than they had, and they flew into the ground
+    out.throttle = manoeuvre_ == SplitS ? 0.0 : 1.0;
     switch (phase_) {
     case Pull: {
         out.loadFactorG = loadFactor_;

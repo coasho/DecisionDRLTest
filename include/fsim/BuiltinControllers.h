@@ -543,7 +543,7 @@ public:
     void reset() override;
 
 private:
-    enum Phase { Entry, Pull, Roll, Done } phase_ = Entry;
+    enum Phase { Entry, Pull, Roll, Recover, Done } phase_ = Entry;
     Manoeuvre manoeuvre_ = Loop;
     double loadFactor_ = 3.5, rollRate_ = 1.5;
     double pitchTravel_ = 0.0, rollTravel_ = 0.0, timer_ = 0.0;

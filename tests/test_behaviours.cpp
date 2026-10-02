@@ -210,3 +210,48 @@ TEST_CASE("aerobatics: too slow, or a split-S too low, is refused; one flown out
     CHECK(w.activity(within.activity)->state == ActivityState::Completed);
     for (const auto v : {marginal, fighter}) CHECK(w.vehicleState(v)->altitudeAglM > 1500.0);
 }
+
+TEST_CASE("aerobatics: a loop given up departed is recovered at idle, then levelled out; a split-S is flown at idle", "[behaviours]") {
+    session::World w(options("behaviours-aerobatics-recover"));
+    // over the top at 58 m/s the EA-18G gives up its loop departed; before 4.64 it levelled out at its entry's speed and
+    // height at once, lit its afterburner, and sank in a deep stall at 50 deg to the ground
+    const auto growler = wing(w, "ea18g", 3000.0, 174.4);
+    const auto fighter = wing(w, "f16c", 3000.0, 165.0, 1);
+    BehaviorCommand loop = behavior("aerobatics");
+    loop.params = {{"manoeuvre", 1.0}};
+    BehaviorCommand splitS = behavior("aerobatics");
+    splitS.params = {{"manoeuvre", 3.0}};
+    const CommandResult given = w.submit(growler, loop);
+    const CommandResult down = w.submit(fighter, splitS);
+    REQUIRE(given.accepted());
+    REQUIRE(down.accepted());
+    const double alphaMax = 0.6109; // its law's limit, 35 deg
+    const double stepS = w.dt() * w.frameSkip();
+    double beyondS = 0.0, fullBeyondS = 0.0, lowest = std::numeric_limits<double>::infinity();
+    const unsigned n = stepsFor(w, 150.0);
+    for (unsigned k = 0; k < n; ++k) {
+        w.step();
+        const auto& s = *w.vehicleState(growler);
+        if (!w.activity(given.activity)->live() && std::abs(s.alphaRad) > alphaMax) {
+            beyondS += stepS;
+            if (s.throttlePosition[0] > 0.05) fullBeyondS += stepS;
+        }
+        lowest = std::min(lowest, w.vehicleState(fighter)->altitudeMslM);
+    }
+    const ActivityRecord& failed = *w.activity(given.activity);
+    CHECK(failed.state == ActivityState::Failed);
+    CHECK(failed.reason == Reason::BehaviorFailed);
+    const auto& s = *w.vehicleState(growler);
+    INFO("beyond its alpha " << beyondS << " s, " << fullBeyondS << " s of it with power; at the end " << s.altitudeMslM << " m, "
+                             << s.airspeedCalibratedMs << " m/s, alpha " << s.alphaRad << ", climbing " << -s.velocityNedMs[2]);
+    CHECK(fullBeyondS < 1.0);                         // no power into its departure
+    CHECK(beyondS < 30.0);                            // out of it
+    CHECK(s.altitudeMslM > 2400.0);                   // level, on its entry's speed, where it recovered
+    CHECK(std::abs(s.velocityNedMs[2]) < 1.0);
+    CHECK(std::abs(s.alphaRad) < 0.15);
+    CHECK(s.airspeedCalibratedMs > 140.0);
+    // the F-16C's split-S at idle: before 4.64 at full afterburner it reached 360 m/s and flew into the ground
+    INFO("the split-S's lowest " << lowest << " m");
+    CHECK(w.activity(down.activity)->state == ActivityState::Completed);
+    CHECK(lowest > 800.0);
+}
