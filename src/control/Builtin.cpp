@@ -22,6 +22,8 @@ constexpr double kThrottleStopShare = 0.005; // a throttle this near idle or ful
 // held within this), until its angle of attack is this far within its envelope's and its speed this share of its least
 constexpr double kRecoverPitchRad = 10.0 * units::kPi / 180.0, kRecoverBankRad = 0.785, kRecoverMarginRad = 5.0 * units::kPi / 180.0;
 constexpr double kRecoverShare = 1.5;
+// given up slow over its top, upside down, at least this high: pulled on through at this load factor (its law's limits hold it, 4.67)
+constexpr double kPullThroughAglM = 300.0, kPullThroughG = 2.0;
 
 double clamp11(double v) noexcept { return std::clamp(v, -1.0, 1.0); }
 
@@ -790,7 +792,22 @@ Command AerobaticBehavior::update(const ControlContext& ctx, const Command&) {
     const bool slow = std::isfinite(minCasMs_) && s.airspeedCalibratedMs < minCasMs_;
     if ((phase_ == Pull || phase_ == Roll) && (slow || departed || s.altitudeAglM < 150.0)) {
         failed_ = true;
-        phase_ = Done;
+        // given up slow over its top, upside down and high enough: pulled on through, its nose down to gain its speed, before it
+        // levels out (4.67; rolled upright there, nose high, the Gripen fell from 56 to 40 m/s, its least 60)
+        phase_ = slow && !departed && std::abs(s.eulerRad[0]) > 0.5 * units::kPi && s.altitudeAglM >= kPullThroughAglM ? PullThrough : Done;
+    }
+    if (phase_ == PullThrough) {
+        // upright again, its nose coming up, or near the ground: levelled out where it is, on its heading then
+        const bool through = std::abs(s.eulerRad[0]) < 0.5 * units::kPi && s.angularRateBodyRadS[1] > 0.0;
+        if (departed || through || s.altitudeAglM < 150.0) {
+            entryAltitude_ = s.altitudeMslM;
+            entryHeading_ = geo::wrapTwoPi(s.eulerRad[2] - (manoeuvre_ == Immelmann || manoeuvre_ == SplitS ? units::kPi : 0.0));
+            phase_ = Done;
+        } else {
+            AccelerationCommand on;
+            on.loadFactorG = kPullThroughG, on.rollRateRadS = 0.0, on.throttle = 1.0;
+            return on;
+        }
     }
     // departed - as it gives up, or levelling out after it - it recovers before it levels out (docs/flight-autonomy.md,
     // 4.64); too near the ground, it levels out at once. Given up slow, and not departed, it levels out at once: recovered

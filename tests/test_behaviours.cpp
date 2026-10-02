@@ -211,6 +211,28 @@ TEST_CASE("aerobatics: too slow, or a split-S too low, is refused; one flown out
     for (const auto v : {marginal, fighter}) CHECK(w.vehicleState(v)->altitudeAglM > 1500.0);
 }
 
+TEST_CASE("aerobatics: a loop given up slow over its top, upside down, is pulled on through before it levels out (4.67)", "[behaviours]") {
+    // rolled upright there, nose high, the Gripen fell from 56 to 40 m/s, its least 60 (before 4.67)
+    session::World w(options("behaviours-aerobatics-through"));
+    const auto gripen = wing(w, "gripen", 3000.0, 140.0); // (its cruise)
+    BehaviorCommand loop = behavior("aerobatics");
+    loop.params = {{"manoeuvre", 1.0}};
+    const CommandResult r = w.submit(gripen, loop);
+    REQUIRE(r.accepted());
+    double slowest = std::numeric_limits<double>::infinity();
+    const unsigned n = stepsFor(w, 60.0);
+    for (unsigned k = 0; k < n; ++k) {
+        w.step();
+        if (!w.activity(r.activity)->live()) slowest = std::min(slowest, w.vehicleState(gripen)->airspeedCalibratedMs);
+    }
+    const auto& s = *w.vehicleState(gripen);
+    INFO("its slowest given up " << slowest << " m/s; at the end " << s.altitudeMslM << " m, " << s.airspeedCalibratedMs << " m/s");
+    CHECK(w.activity(r.activity)->reason == Reason::BehaviorFailed);
+    CHECK(slowest > 45.0); // (47.6 m/s)
+    CHECK(std::abs(s.eulerRad[0]) < 0.2); // levelled out, upright
+    CHECK(s.airspeedCalibratedMs > 80.0);
+}
+
 TEST_CASE("aerobatics: a loop given up departed is recovered at idle, then levelled out; a split-S is flown at idle", "[behaviours]") {
     session::World w(options("behaviours-aerobatics-recover"));
     // over the top at 58 m/s the EA-18G gives up its loop departed; before 4.64 it levelled out at its entry's speed and
